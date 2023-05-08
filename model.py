@@ -215,6 +215,105 @@ class minerva(nn.Module):
 
 
 
+
+
+class minerva_mse(nn.Module):
+    # Exemplar model incorporating multi-head attention for exemplar weighting, 
+    # with separate attention for the acoustic and phonetic information.
+    def __init__(
+        self, 
+        config,
+        ex_classes
+    ):
+        super().__init__()
+
+        self.input_dim = config.input_dim
+        self.num_classes = config.num_classes
+        self.use_g = config.use_g
+        self.dim_reduce = config.dim_reduce
+        self.dropout = config.dropout
+        self.p_factor = config.p_factor
+        self.train_class_reps = config.train_class_reps
+        self.train_ex_class = config.train_ex_class
+        
+        if self.dim_reduce == None:
+            self.dim_reduce = self.input_dim
+
+        if self.use_g:
+            self.g = nn.Linear(
+                in_features = self.input_dim,
+                out_features = self.dim_reduce,
+                bias = False
+            )
+
+        if self.dropout > 0:
+            self.do = nn.Dropout(p = self.dropout)
+
+        self.class_reps = nn.Parameter(nn.functional.one_hot(torch.arange(self.num_classes)), requires_grad = self.train_class_reps)
+
+        self.ex_classes = nn.Parameter(ex_classes, requires_grad = self.train_ex_class)
+
+
+    def forward(self, features, ex_features, p_factor = None):
+        
+        if p_factor is None:
+            p_factor = self.p_factor
+
+        if self.use_g:
+            features = self.g(features)
+            ex_features = self.g(ex_features)
+
+        if self.dropout > 0:
+            features = self.do(features)
+            ex_features = self.do(ex_features)
+
+        # Cosine similarity
+        # s has dim (batch_size, ex_batch_size)
+        s = torch.matmul(
+            nn.functional.normalize(features, dim = 1), 
+            torch.t(nn.functional.normalize(ex_features, dim = 1))
+        )
+
+        # Activation
+        # a has dim (batch_size, ex_batch_size)
+        a = self.activation(s, p_factor)
+        # print(f"a dim: {a.size()}")
+
+        # Intensity
+        # intensity has dim batch_size
+        # intensity = torch.sum(a, dim = 1)
+
+        # echo has dim (batch_size, num_classes)
+        echo = torch.matmul(a, self.ex_classes)
+
+
+        b = self.ex_classes.sum(dim = 0)
+        b = torch.clamp(b, min = 1)
+        # # b = a.sum(dim = 1)
+        # # print(f"b size: {b.size()}")
+
+        echo = torch.div(echo, b)
+        echo = torch.clamp(echo, min = 0, max = 1)
+        # print(f"echo:\n\t{echo}")
+
+        # # probs has dim (batch_size, num_phones)
+        # probs = -torch.cdist(echo, class_reps)
+
+        return echo
+
+    
+    def activation(self, s, p_factor = None):
+
+        if p_factor is None:
+            p_factor = self.p_factor
+
+        return torch.mul(torch.pow(torch.abs(s), p_factor), torch.sign(s))
+
+
+
+
+
+
 class minerva_base(nn.Module):
     # Exemplar model incorporating multi-head attention for exemplar weighting, 
     # with separate attention for the acoustic and phonetic information.
@@ -222,12 +321,6 @@ class minerva_base(nn.Module):
         self, 
         config,
         ex_classes
-        # input_dim,
-        # num_classes,
-        # use_g = True,
-        # dim_reduce = None,
-        # dropout = 0,
-        # p_factor = 1
     ):
         super().__init__()
 
@@ -390,6 +483,66 @@ class BertMinervaForMultiLabelClassification(BertPreTrainedModel):
 
         if labels is not None:
             loss = self.loss_fct(echos, labels)
+            outputs = (loss,) + outputs
+
+        return outputs  # (loss), logits, (hidden_states), (attentions)
+    
+
+    
+class BertMinervaMSEForMultiLabelClassification(BertPreTrainedModel):
+    def __init__(self, config, minerva_config, exemplars):
+        super().__init__(config)
+        self.num_labels = config.num_labels
+
+        self.bert = BertModel(config)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.exemplars = exemplars
+        self.minerva = minerva_base(minerva_config, ex_classes = exemplars[3])
+        self.class_reps = nn.Parameter(
+            nn.functional.one_hot(torch.arange(config.num_labels)).type(torch.float), 
+            requires_grad = minerva_config.train_class_reps
+        )
+        self.loss_fct = nn.BCEWithLogitsLoss()
+
+        self.init_weights()
+
+    def forward(
+            self,
+            input_ids=None,
+            attention_mask=None,
+            token_type_ids=None,
+            position_ids=None,
+            head_mask=None,
+            inputs_embeds=None,
+            labels=None,
+    ):
+        outputs = self.bert(
+            input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
+        )
+        pooled_output = outputs[1]
+        exemplar_output = self.bert(
+            input_ids = self.exemplars[0],
+            attention_mask = self.exemplars[1],
+            token_type_ids = self.exemplars[2]
+        )
+        pooled_exemplar_output = exemplar_output[1]
+
+        pooled_output = self.dropout(pooled_output)
+        echos = self.minerva(pooled_output, pooled_exemplar_output)
+        distances = torch.cdist(echos, self.class_reps)
+
+        outputs = (distances, echos,) + outputs[2:]  # add hidden states and attention if they are here
+
+
+        if labels is not None:
+            print(f"\nechos size:\n{echos.size()}\n")
+            print(f"\nechos size:\n{echos.size()}\n")
+            loss = self.loss_fct(echos, self.class_reps)
             outputs = (loss,) + outputs
 
         return outputs  # (loss), logits, (hidden_states), (attentions)

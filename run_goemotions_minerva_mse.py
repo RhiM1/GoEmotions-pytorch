@@ -18,7 +18,7 @@ from transformers import (
     get_linear_schedule_with_warmup
 )
 
-from model import BertForMultiLabelClassification, BertMinervaForMultiLabelClassification, MinervaConfig
+from model import BertForMultiLabelClassification, BertMinervaForMultiLabelClassification, MinervaConfig, BertMinervaMSEForMultiLabelClassification
 from utils import (
     init_logger,
     set_seed,
@@ -217,7 +217,10 @@ def evaluate(args, model, eval_dataset, mode, global_step=None, threshold = None
         preds_[preds <= threshold] = 0
         result = compute_metrics(out_label_ids, preds_, mode = mode)
         # print(f"threshold: {threshold}, weighted_f1: {result['weighted_f1']:>0.2f}")
-        results.update(result)
+        if result['weighted_f1_' + mode] > best_f1:
+            best_f1 = result['weighted_f1_' + mode]
+            results.update(result)
+            results['threshold'] = threshold
 
 
         # tp = np.logical_and(preds_ == 1, out_label_ids == 1).astype(np.float32).sum(axis = 0)
@@ -314,7 +317,7 @@ def main(cli_args):
     # GPU or CPU
     args.device = "cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu"
     exemplars = [thing.to(args.device) for thing in exemplars]
-    model = BertMinervaForMultiLabelClassification.from_pretrained(
+    model = BertMinervaMSEForMultiLabelClassification.from_pretrained(
         args.model_name_or_path,
         config=config,
         minerva_config = minerva_config,
@@ -374,7 +377,7 @@ def main(cli_args):
         logger.info("Evaluate the following checkpoints: %s", checkpoints)
         for checkpoint in checkpoints:
             global_step = checkpoint.split("-")[-1]
-            model = BertMinervaForMultiLabelClassification.from_pretrained(checkpoint)
+            model = BertMinervaMSEForMultiLabelClassification.from_pretrained(checkpoint)
             model.to(args.device)
             result = evaluate(args, model, test_dataset, mode="test", global_step=global_step)
             result = dict((k + "_{}".format(global_step), v) for k, v in result.items())
