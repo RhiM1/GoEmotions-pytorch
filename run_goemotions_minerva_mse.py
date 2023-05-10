@@ -11,12 +11,10 @@ from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 from tqdm import tqdm, trange
 from attrdict import AttrDict
 
-from transformers import (
-    BertConfig,
-    BertTokenizer,
-    AdamW,
-    get_linear_schedule_with_warmup
-)
+# from transformers import AdamW
+from transformers import get_linear_schedule_with_warmup
+from transformers import BertConfig
+from transformers import BertTokenizer
 
 from model import BertForMultiLabelClassification, BertMinervaForMultiLabelClassification, MinervaConfig, BertMinervaMSEForMultiLabelClassification
 from utils import (
@@ -53,7 +51,8 @@ def train(args,
          'weight_decay': args.weight_decay},
         {'params': [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
     ]
-    optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
+    optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
+    # optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
         num_warmup_steps=int(t_total * args.warmup_proportion),
@@ -200,6 +199,7 @@ def evaluate(args, model, eval_dataset, mode, global_step=None, threshold = None
     }
     
     preds_ = np.copy(preds)
+    print(f"\npreds_\n{preds_}\n")
     if threshold is None:
         best_f1 = 0.0
         for threshold in args.threshold:
@@ -217,10 +217,10 @@ def evaluate(args, model, eval_dataset, mode, global_step=None, threshold = None
         preds_[preds <= threshold] = 0
         result = compute_metrics(out_label_ids, preds_, mode = mode)
         # print(f"threshold: {threshold}, weighted_f1: {result['weighted_f1']:>0.2f}")
-        if result['weighted_f1_' + mode] > best_f1:
-            best_f1 = result['weighted_f1_' + mode]
-            results.update(result)
-            results['threshold'] = threshold
+        # if result['weighted_f1_' + mode] > best_f1:
+        #     best_f1 = result['weighted_f1_' + mode]
+        results.update(result)
+            # results['threshold'] = threshold
 
 
         # tp = np.logical_and(preds_ == 1, out_label_ids == 1).astype(np.float32).sum(axis = 0)

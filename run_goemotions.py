@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import glob
+import wandb
 
 import numpy as np
 import torch
@@ -112,11 +113,24 @@ def train(args,
                 model.zero_grad()
                 global_step += 1
 
+                
                 if args.logging_steps > 0 and global_step % args.logging_steps == 0:
+                    
+                    if not cli_args.skip_wandb:
+                        wandb.log({
+                            'train_loss': tr_loss / global_step,
+                            'global_step': global_step
+                        })
+
+                    results = evaluate(args, model, dev_dataset, "dev", global_step)
                     if args.evaluate_test_during_training:
-                        evaluate(args, model, test_dataset, "test", global_step)
-                    else:
-                        evaluate(args, model, dev_dataset, "dev", global_step)
+                        evaluate(args, model, test_dataset, "test", global_step, threshold = results["threshold"])
+
+                # if args.logging_steps > 0 and global_step % args.logging_steps == 0:
+                #     if args.evaluate_test_during_training:
+                #         evaluate(args, model, test_dataset, "test", global_step)
+                #     else:
+                #         evaluate(args, model, dev_dataset, "dev", global_step)
 
                 if args.save_steps > 0 and global_step % args.save_steps == 0:
                     # Save model checkpoint
@@ -146,7 +160,7 @@ def train(args,
     return global_step, tr_loss / global_step
 
 
-def evaluate(args, model, eval_dataset, mode, global_step=None):
+def evaluate(args, model, eval_dataset, mode, global_step=None, threshold = None):
     results = {}
     eval_sampler = SequentialSampler(eval_dataset)
     eval_dataloader = DataLoader(eval_dataset, sampler=eval_sampler, batch_size=args.eval_batch_size)
@@ -188,12 +202,37 @@ def evaluate(args, model, eval_dataset, mode, global_step=None):
 
     eval_loss = eval_loss / nb_eval_steps
     results = {
-        "loss": eval_loss
+        str(mode) + "_loss": eval_loss
     }
-    preds[preds > args.threshold] = 1
-    preds[preds <= args.threshold] = 0
-    result = compute_metrics(out_label_ids, preds)
-    results.update(result)
+
+    preds_ = np.copy(preds)
+    if threshold is None:
+        best_f1 = 0.0
+        for threshold in args.threshold:
+
+            preds_[preds > threshold] = 1
+            preds_[preds <= threshold] = 0
+            result = compute_metrics(out_label_ids, preds_, mode = mode)
+            # print(f"threshold: {threshold}, weighted_f1: {result['weighted_f1']:>0.2f}")
+            if result['weighted_f1_' + mode] > best_f1:
+                best_f1 = result['weighted_f1_' + mode]
+                results.update(result)
+                results['threshold'] = threshold
+    else:
+        preds_[preds > threshold] = 1
+        preds_[preds <= threshold] = 0
+        result = compute_metrics(out_label_ids, preds_, mode = mode)
+        # print(f"threshold: {threshold}, weighted_f1: {result['weighted_f1']:>0.2f}")
+        results.update(result)
+
+    # preds[preds > args.threshold] = 1
+    # preds[preds <= args.threshold] = 0
+    # result = compute_metrics(out_label_ids, preds)
+    # results.update(result)
+
+    
+    if not cli_args.skip_wandb:
+        wandb.log(results)
 
     output_dir = os.path.join(args.output_dir, mode)
     if not os.path.exists(output_dir):
@@ -251,6 +290,25 @@ def main(cli_args):
     if dev_dataset is None:
         args.evaluate_test_during_training = True  # If there is no dev dataset, only use test dataset
 
+
+    if not cli_args.skip_wandb:
+        modelName = args.output_dir.split("-")[1] + \
+            "_" + args.model_type + \
+            "_wd" + str(args.weight_decay) + \
+            "_lr" + str(args.learning_rate)
+        run = wandb.init(project=args.wandb_project, reinit = True, name = modelName)
+
+        print(f'\nLogging with Wandb id: {wandb.run.id}\n')
+
+        wandb_config={
+            "dataset": "GoEmotions",
+            "epochs": args.num_train_epochs,
+            "weight_decay": args.weight_decay,
+            "learning rate": args.learning_rate
+        }
+
+
+
     if args.do_train:
         global_step, tr_loss = train(args, model, tokenizer, train_dataset, dev_dataset, test_dataset)
         logger.info(" global_step = {}, average loss = {}".format(global_step, tr_loss))
@@ -279,11 +337,15 @@ def main(cli_args):
             for key in sorted(results.keys()):
                 f_w.write("{} = {}\n".format(key, str(results[key])))
 
+    if not cli_args.skip_wandb:
+        run.finish()
+
 
 if __name__ == '__main__':
     cli_parser = argparse.ArgumentParser()
 
     cli_parser.add_argument("--taxonomy", type=str, required=True, help="Taxonomy (original, ekman, group)")
+    cli_parser.add_argument("--skip_wandb", action='store_true', help="Don't use WandB logging")
 
     cli_args = cli_parser.parse_args()
 

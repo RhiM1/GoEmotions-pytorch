@@ -1,21 +1,22 @@
 {
   "task": "goemotions",
+  "wandb_project": "goemotions-group",
   "data_dir": "data/group",
   "ckpt_dir": "ckpt/group",
-  "output_dir": "bert-base-cased-goemotions-group",
+  "output_dir": "bert-002",
   "train_file": "train.tsv",
   "dev_file": "dev.tsv",
   "test_file": "test.tsv",
   "label_file": "labels.txt",
-  "evaluate_test_during_training": false,
+  "evaluate_test_during_training": true,
   "eval_all_checkpoints": true,
   "save_optimizer": false,
   "do_lower_case": false,
   "do_train": true,
-  "do_eval": true,
+  "do_eval": false,
   "max_seq_len": 50,
   "num_train_epochs": 10,
-  "weight_decay": 0.0,
+  "weight_decay": 0.001,
   "gradient_accumulation_steps": 1,
   "adam_epsilon": 1e-8,
   "warmup_proportion": 0.1,
@@ -31,5 +32,5 @@
   "logging_steps": 1000,
   "save_steps": 1000,
   "learning_rate": 5e-5,
-  "threshold": 0.3
+  "threshold": [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 }

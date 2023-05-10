@@ -53,7 +53,8 @@ def train(args,
          'weight_decay': args.weight_decay},
         {'params': [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
     ]
-    
+    print(optimizer_grouped_parameters)
+    quit
     optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
@@ -125,6 +126,7 @@ def train(args,
                     results = evaluate(args, model, dev_dataset, "dev", global_step)
                     if args.evaluate_test_during_training:
                         evaluate(args, model, test_dataset, "test", global_step, threshold = results["threshold"])
+                    
 
                 if args.save_steps > 0 and global_step % args.save_steps == 0:
                     # Save model checkpoint
@@ -297,70 +299,90 @@ def main(cli_args):
         num_classes = len(label_list)
     )
 
+    print("\n--- Getting tokenizer ---\n")
+
+    # tokenizer = BertTokenizer.from_pretrained(
+    #     args.ckpt_dir + "/" + args.output_dir + "/" + cli_args.ckpt
+    # )
     tokenizer = BertTokenizer.from_pretrained(
         args.tokenizer_name_or_path,
     )
+
+    
+    print("\n--- Loading datasets ---\n")
     # Load dataset
     train_dataset = load_and_cache_examples(args, tokenizer, mode="train") if args.train_file else None
 
     exIDX = torch.randperm(len(train_dataset))[0:args.num_ex]
 
     exemplars = train_dataset[exIDX]
+    keep_ex = exemplars[3].clone().detach()
+    print(keep_ex)
 
     dev_dataset = load_and_cache_examples(args, tokenizer, mode="dev") if args.dev_file else None
     test_dataset = load_and_cache_examples(args, tokenizer, mode="test") if args.test_file else None
 
-
+    print("\n--- Getting model ---\n")
     # GPU or CPU
     args.device = "cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu"
     exemplars = [thing.to(args.device) for thing in exemplars]
     model = BertMinervaForMultiLabelClassification.from_pretrained(
-        args.model_name_or_path,
+        args.output_dir + "/" + cli_args.ckpt,
         config=config,
         minerva_config = minerva_config,
         exemplars = exemplars
     )
 
+
+    print("\n--- Outputting ---\n")
+
+    ex_reps = model.minerva.ex_classes
+    print(ex_reps)
+
+    for ex in range(len(ex_reps)):
+        print([keep_ex[ex]], [round(i, 4) for i in ex_reps[ex].tolist()])
+
+    quit()
+
     model.to(args.device)
 
-    if dev_dataset is None:
-        args.evaluate_test_during_training = True  # If there is no dev dataset, only use test dataset
+    # if dev_dataset is None:
+    #     args.evaluate_test_during_training = True  # If there is no dev dataset, only use test dataset
 
-    if not cli_args.skip_wandb:
-        modelName = args.output_dir.split("-")[2] + \
-            "_" + args.model_type + \
-            "_ex" + str(args.num_ex) + \
-            "_wd" + str(args.weight_decay) + \
-            "_lr" + str(args.learning_rate) + \
-            "_p" + str(args.minerva_p_factor) + \
-            "_ug" + str(int(args.minerva_use_g)) + \
-            "_dr" + str(int(args.minerva_dim_reduce)) + \
-            "_mdo" + str(args.minerva_dropout) + \
-            "_tcr" + str(int(args.minerva_train_class_reps)) + \
-            "_tec" + str(int(args.minerva_train_ex_class)) + \
-            "_tef" + str(int(args.minerva_train_ex_feats))
-        run = wandb.init(project=args.wandb_project, reinit = True, name = modelName)
+    # if not cli_args.skip_wandb:
+    #     modelName = args.output_dir.split("-")[2] + \
+    #         "_" + args.model_type + \
+    #         "_ex" + str(args.num_ex) + \
+    #         "_wd" + str(args.weight_decay) + \
+    #         "_lr" + str(args.learning_rate) + \
+    #         "_p" + str(args.minerva_p_factor) + \
+    #         "_ug" + str(int(args.minerva_use_g)) + \
+    #         "_mdo" + str(args.minerva_dropout) + \
+    #         "_tcr" + str(int(args.minerva_train_class_reps)) + \
+    #         "_tec" + str(int(args.minerva_train_ex_class)) + \
+    #         "_tef" + str(int(args.minerva_train_ex_feats))
+    #     run = wandb.init(project=args.wandb_project, reinit = True, name = modelName)
 
-        print(f'\nLogging with Wandb id: {wandb.run.id}\n')
+    #     print(f'\nLogging with Wandb id: {wandb.run.id}\n')
 
-        wandb_config={
-            "weight decay": args.weight_decay,
-            "p-factor": args.minerva_p_factor,
-            "num ex": args.num_ex,
-            "dataset": "GoEmotions",
-            "epochs": args.num_train_epochs,
-            "weight_decay": args.weight_decay,
-            "learning rate": args.learning_rate,
-            "use_g": args.minerva_use_g,
-            "minerva dropout": args.minerva_dropout,
-            "train_class_reps": args.minerva_train_class_reps,
-            "train_ex_class": args.minerva_train_ex_class,
-            "train_ex_feats": args.minerva_train_ex_feats
-        }
+    #     wandb_config={
+    #         "weight decay": args.weight_decay,
+    #         "p-factor": args.minerva_p_factor,
+    #         "num ex": args.num_ex,
+    #         "dataset": "GoEmotions",
+    #         "epochs": args.num_train_epochs,
+    #         "weight_decay": args.weight_decay,
+    #         "learning rate": args.learning_rate,
+    #         "use_g": args.minerva_use_g,
+    #         "minerva dropout": args.minerva_dropout,
+    #         "train_class_reps": args.minerva_train_class_reps,
+    #         "train_ex_class": args.minerva_train_ex_class,
+    #         "train_ex_feats": args.minerva_train_ex_feats
+    #     }
 
-    if args.do_train:
-        global_step, tr_loss = train(args, model, tokenizer, train_dataset, dev_dataset, test_dataset)
-        logger.info(" global_step = {}, average loss = {}".format(global_step, tr_loss))
+    # if args.do_train:
+    #     global_step, tr_loss = train(args, model, tokenizer, train_dataset, dev_dataset, test_dataset)
+    #     logger.info(" global_step = {}, average loss = {}".format(global_step, tr_loss))
 
     results = {}
     if args.do_eval:
@@ -386,16 +408,15 @@ def main(cli_args):
             for key in sorted(results.keys()):
                 f_w.write("{} = {}\n".format(key, str(results[key])))
 
-    
-    if not cli_args.skip_wandb:
-        run.finish()
+    # if not cli_args.skip_wandb:
+    #     run.finish()
 
 
 if __name__ == '__main__':
     cli_parser = argparse.ArgumentParser()
 
     cli_parser.add_argument("--taxonomy", type=str, required=True, help="Taxonomy (original, ekman, group)")
-    cli_parser.add_argument("--skip_wandb", action='store_true', help="Don't use WandB logging")
+    cli_parser.add_argument("--ckpt", type=str, required=True, help="Taxonomy (original, ekman, group)")
 
     cli_args = cli_parser.parse_args()
 
