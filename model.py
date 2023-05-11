@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from transformers import BertPreTrainedModel, BertModel, BertForSequenceClassification, BertConfig
+from typing import Callable, Optional
 
 
 class BertForMultiLabelClassification(BertPreTrainedModel):
@@ -217,6 +218,87 @@ class minerva(nn.Module):
 
 
 
+class contrastive_loss(nn.Module):
+    r"""
+    Examples::
+
+        >>> target = torch.ones([10, 64], dtype=torch.float32)  # 64 classes, batch size = 10
+        >>> output = torch.full([10, 64], 1.5)  # A prediction (logit)
+        >>> pos_weight = torch.ones([64])  # All weights are equal to 1
+        >>> criterion = torch.nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+        >>> criterion(output, target)  # -log(sigmoid(1.5))
+        tensor(0.20...)
+
+    Args:
+        weight (Tensor, optional): a manual rescaling weight given to the loss
+            of each batch element. If given, has to be a Tensor of size `nbatch`.
+        size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
+            the losses are averaged over each loss element in the batch. Note that for
+            some losses, there are multiple elements per sample. If the field :attr:`size_average`
+            is set to ``False``, the losses are instead summed for each minibatch. Ignored
+            when :attr:`reduce` is ``False``. Default: ``True``
+        reduce (bool, optional): Deprecated (see :attr:`reduction`). By default, the
+            losses are averaged or summed over observations for each minibatch depending
+            on :attr:`size_average`. When :attr:`reduce` is ``False``, returns a loss per
+            batch element instead and ignores :attr:`size_average`. Default: ``True``
+        reduction (str, optional): Specifies the reduction to apply to the output:
+            ``'none'`` | ``'mean'`` | ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the sum of the output will be divided by the number of
+            elements in the output, ``'sum'``: the output will be summed. Note: :attr:`size_average`
+            and :attr:`reduce` are in the process of being deprecated, and in the meantime,
+            specifying either of those two args will override :attr:`reduction`. Default: ``'mean'``
+        pos_weight (Tensor, optional): a weight of positive examples.
+                Must be a vector with length equal to the number of classes.
+
+    Shape:
+        - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
+        - Target: :math:`(*)`, same shape as the input.
+        - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same
+          shape as input.
+
+     Examples::
+
+        >>> loss = nn.BCEWithLogitsLoss()
+        >>> input = torch.randn(3, requires_grad=True)
+        >>> target = torch.empty(3).random_(2)
+        >>> output = loss(input, target)
+        >>> output.backward()
+    """
+    def __init__(self, weight: Optional[torch.Tensor] = None, size_average=None, reduce=None, reduction: str = 'mean',
+                 pos_weight: Optional[torch.Tensor] = None, m = 0.5) -> None:
+        super(contrastive_loss, self).__init__()
+        self.m = m
+        self.register_buffer('weight', weight)
+        self.register_buffer('pos_weight', pos_weight)
+        # self.weight: Optional[torch.Tensor]
+        # self.pos_weight: Optional[torch.Tensor]
+
+    def forward(self, input: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+
+        # Input is distances from classes
+        # Target is true/false for each class
+
+        # print(f"input:\n{input}")
+        # print(f"target:\n{target}")
+        # print(f"input.size: {input.size()}, target.size: {target.size()}")
+        # pos_loss = torch.mul(target, input)
+        # neg_loss = torch.mul((1 - target), (self.m - input))
+        # for i in range(10):
+        #     print(f"{i} \n {input[i]} \n {target[i]} \n {pos_loss[i]} \n {neg_loss[i]}\n")
+
+
+        # neg_loss = neg_loss.clamp(min = 0)
+        return (torch.mul(target, input) + torch.mul((1 - target), (self.m - input).clamp(min = 0))).mean()
+        # return (pos_loss + neg_loss).mean()
+
+        # return nn.functional.binary_cross_entropy_with_logits(input, target,
+        #                                           self.weight,
+        #                                           pos_weight=self.pos_weight,
+        #                                           reduction=self.reduction)
+
+
+
+
 
 
 
@@ -331,7 +413,8 @@ class minerva_mse(nn.Module):
         self.train_class_reps = config.train_class_reps
         self.train_ex_class = config.train_ex_class
         self.class_dim = config.class_dim
-        self.ex_classes = ex_classes
+        self.ex_classes = nn.Parameter(ex_classes, requires_grad = False)
+        self.ex_feats = nn.Parameter(ex_classes, requires_grad = False)
         
         if self.dim_reduce == None:
             self.dim_reduce = self.input_dim
@@ -351,14 +434,21 @@ class minerva_mse(nn.Module):
             if self.train_ex_class:
                 ex_class_add = torch.zeros(len(ex_classes), self.num_classes, dtype = torch.float)
         else:
-            class_reps = torch.rand(self.num_classes, self.class_dim)
+            class_reps = torch.rand(self.num_classes, self.class_dim) * 2 - 1
             if self.train_ex_class:
                 ex_class_add = torch.zeros(len(ex_classes), self.class_dim, dtype = torch.float)
 
         self.class_reps = nn.Parameter(class_reps, requires_grad = self.train_class_reps)
+
         if self.train_ex_class:
             self.ex_class_add = nn.Parameter(ex_class_add)
-        
+
+
+
+        # print(self.class_reps)
+        # print(self.ex_classes)
+        # print(nn.functional.normalize(self.ex_classes.type(torch.float), p = 1, dim = 1) @ self.class_reps)
+        # quit()
 
     def forward(self, features, ex_features, p_factor = None):
         
@@ -441,6 +531,7 @@ class MinervaConfig:
         train_class_reps = False,
         train_ex_class = False,
         train_ex_feat = False,
+        m = 0.5,
         num_classes = 39
     ):
         # super().__init__(self)
@@ -453,6 +544,7 @@ class MinervaConfig:
         self.train_class_reps = train_class_reps
         self.train_ex_class = train_ex_class
         self.train_ex_feat = train_ex_feat
+        self.m = m
         self.num_classes = num_classes
 
 
@@ -519,7 +611,8 @@ class BertMinervaMSEForMultiLabelClassification(BertPreTrainedModel):
         self.exemplars = exemplars
         self.minerva = minerva_mse(minerva_config, ex_classes = exemplars[3])
 
-        self.loss_fct = nn.BCEWithLogitsLoss()
+        # self.loss_fct = nn.BCEWithLogitsLoss()
+        self.loss_fct = contrastive_loss(m = minerva_config.m)
 
     def forward(
             self,
@@ -555,7 +648,7 @@ class BertMinervaMSEForMultiLabelClassification(BertPreTrainedModel):
         if labels is not None:
             # print(f"\nechos size:\n{echos.size()}\n")
             # print(f"\nechos size:\n{echos.size()}\n")
-            loss = self.loss_fct(-distances, labels)
+            loss = self.loss_fct(distances, labels)
             outputs = (loss,) + outputs
 
         return outputs  # (loss), logits, (hidden_states), (attentions)

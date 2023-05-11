@@ -46,12 +46,34 @@ def train(args,
 
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ['bias', 'LayerNorm.weight']
+
     optimizer_grouped_parameters = [
-        {'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
-         'weight_decay': args.weight_decay},
-        {'params': [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
+        {'params': [p for n, p in model.bert.named_parameters() if not any(nd in n for nd in no_decay)],
+         'weight_decay': args.weight_decay,
+         'lr': args.learning_rate},
+        {'params': [p for n, p in model.bert.named_parameters() if any(nd in n for nd in no_decay)], 
+         'weight_decay': 0.0,
+         'lr': args.learning_rate},
+        {'params': model.minerva.g.parameters(), 
+         'weight_decay': args.weight_decay,
+         'lr': args.learning_rate}
     ]
-    optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
+
+    if args.minerva_train_class_reps:
+        optimizer_grouped_parameters.append(
+            {'params': model.minerva.class_reps, 
+            'weight_decay': 0.0,
+            'lr': args.minerva_lr}
+        )
+    if args.minerva_train_ex_class:
+        optimizer_grouped_parameters.append(
+            {'params': model.minerva.ex_class_add, 
+            'weight_decay': 0.0,
+            'lr': args.minerva_lr}
+        )
+
+    optimizer = torch.optim.AdamW(optimizer_grouped_parameters, eps=args.adam_epsilon)
+    # optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
     # optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
@@ -126,6 +148,12 @@ def train(args,
                     
 
                 if args.save_steps > 0 and global_step % args.save_steps == 0:
+                    # save class reps (if being trained)
+                    if args.minerva_train_class_reps:
+                        with open(args.output_dir + "/class_reps.txt", 'a') as f:
+                            f.write(f"global step: {global_step}\n")
+                            f.write(f"{model.minerva.class_reps}\n")
+
                     # Save model checkpoint
                     output_dir = os.path.join(args.output_dir, "checkpoint-{}".format(global_step))
                     if not os.path.exists(output_dir):
@@ -200,6 +228,8 @@ def evaluate(args, model, eval_dataset, mode, global_step=None, threshold = None
     
     preds_ = np.copy(preds)
     print(f"\npreds_\n{preds_}\n")
+    print(f"\nclass_reps:\n{model.minerva.class_reps}\n")
+
     if threshold is None:
         best_f1 = 0.0
         for threshold in args.threshold:
@@ -212,6 +242,16 @@ def evaluate(args, model, eval_dataset, mode, global_step=None, threshold = None
                 best_f1 = result['weighted_f1_' + mode]
                 results.update(result)
                 results['threshold'] = threshold
+                
+                detailed_results = {}
+
+                for emotion in range(model.num_labels):
+                    detailed_results[str(emotion) + "_tp"] = np.logical_and(preds_[:, emotion] == 1, out_label_ids[:, emotion] == 1).astype(np.float32).sum(axis = 0)
+                    detailed_results[str(emotion) + "_tn"] = np.logical_and(preds_[:, emotion] == 0, out_label_ids[:, emotion] == 0).astype(np.float32).sum(axis = 0)
+                    detailed_results[str(emotion) + "_fp"] = np.logical_and(preds_[:, emotion] == 1, out_label_ids[:, emotion] == 0).astype(np.float32).sum(axis = 0)
+                    detailed_results[str(emotion) + "_fn"] = np.logical_and(preds_[:, emotion] == 0, out_label_ids[:, emotion] == 1).astype(np.float32).sum(axis = 0)
+
+                print(f"threshold: {threshold} \n{detailed_results}")
     else:
         preds_[preds > threshold] = 1
         preds_[preds <= threshold] = 0
@@ -221,28 +261,16 @@ def evaluate(args, model, eval_dataset, mode, global_step=None, threshold = None
         #     best_f1 = result['weighted_f1_' + mode]
         results.update(result)
             # results['threshold'] = threshold
+        detailed_results = {}
 
-
-        # tp = np.logical_and(preds_ == 1, out_label_ids == 1).astype(np.float32).sum(axis = 0)
-        # print(f"tp.shape: {tp.shape}")
-        # tn = np.logical_and(preds_ == 0, out_label_ids == 0).astype(np.float32).sum(axis = 0)
-        # fp = np.logical_and(preds_ == 1, out_label_ids == 0).astype(np.float32).sum(axis = 0)
-        # fn = np.logical_and(preds_ == 0, out_label_ids == 1).astype(np.float32).sum(axis = 0)
-
-        # precision = tp / (tp + fp)
-        # recall = tp / (tp + fn)
-        # f1 = ((precision**(-1) + recall**(-1))/2)**(-1)
-
-        # print(f"Emotion \t Precision \t Recall \t f1 \t tp \t tn \t fp \t fn")
-        # for emotion in range(len(tp)):
-        #     print(f"{emotion} \t   {precision[emotion]:>0.2f} \t   {recall[emotion]:>0.2f} \t   {f1[emotion]:>0.2f} \t {tp[emotion]:>0.0f} \t {tn[emotion]:>0.0f} \t {fp[emotion]:>0.0f} \t {fn[emotion]:>0.0f}")
+        for emotion in range(model.num_labels):
+            detailed_results[str(emotion) + "_tp"] = np.logical_and(preds_[:, emotion] == 1, out_label_ids[:, emotion] == 1).astype(np.float32).sum(axis = 0)
+            detailed_results[str(emotion) + "_tn"] = np.logical_and(preds_[:, emotion] == 0, out_label_ids[:, emotion] == 0).astype(np.float32).sum(axis = 0)
+            detailed_results[str(emotion) + "_fp"] = np.logical_and(preds_[:, emotion] == 1, out_label_ids[:, emotion] == 0).astype(np.float32).sum(axis = 0)
+            detailed_results[str(emotion) + "_fn"] = np.logical_and(preds_[:, emotion] == 0, out_label_ids[:, emotion] == 1).astype(np.float32).sum(axis = 0)
         
+        print(detailed_results)
 
-    # preds[preds > args.threshold] = 1
-    # preds[preds <= args.threshold] = 0
-    # result = compute_metrics(out_label_ids, preds)
-    # results.update(result)
-        
     if not cli_args.skip_wandb:
         wandb.log(results)
 
@@ -258,6 +286,14 @@ def evaluate(args, model, eval_dataset, mode, global_step=None, threshold = None
             logger.info("  {} = {}".format(key, str(results[key])))
             f_w.write("  {} = {}\n".format(key, str(results[key])))
 
+    
+    output_eval_file = os.path.join(output_dir, "{}-{}_detailed.txt".format(mode, global_step) if global_step else "{}.txt".format(mode))
+    with open(output_eval_file, "w") as f_w:
+        logger.info("***** Eval results on {} dataset *****".format(mode))
+        for key in sorted(detailed_results.keys()):
+            logger.info("  {} = {}".format(key, str(detailed_results[key])))
+            f_w.write("  {} = {}\n".format(key, str(detailed_results[key])))
+
     return results
 
 
@@ -268,7 +304,17 @@ def main(cli_args):
         args = AttrDict(json.load(f))
     logger.info("Training/evaluation parameters {}".format(args))
 
-    print(args)
+    try:
+        x = args.minerva_lr
+    except:
+        print("Using global learning rate for Minerva")
+        args.minerva_lr = args.learning_rate
+
+    
+    try:
+        x = args.minerva_m
+    except:
+        args.minerva_m = 0.5
 
     args.output_dir = os.path.join(args.ckpt_dir, args.output_dir)
 
@@ -297,6 +343,7 @@ def main(cli_args):
         train_class_reps = args.minerva_train_class_reps,
         train_ex_class = args.minerva_train_ex_class,
         train_ex_feat = args.minerva_train_ex_feats,
+        m = args.minerva_m,
         num_classes = len(label_list)
     )
 
@@ -335,12 +382,14 @@ def main(cli_args):
             "_ex" + str(args.num_ex) + \
             "_wd" + str(args.weight_decay) + \
             "_lr" + str(args.learning_rate) + \
+            "_mlr" + str(args.minerva_lr) + \
+            "_m" + str(args.minerva_m) + \
             "_p" + str(args.minerva_p_factor) + \
             "_ug" + str(int(args.minerva_use_g)) + \
-            "_mdo" + str(args.minerva_dropout) + \
+            "_dr" + str(int(args.minerva_dim_reduce)) + \
+            "_cd" + str(args.minerva_class_dim) + \
             "_tcr" + str(int(args.minerva_train_class_reps)) + \
-            "_tec" + str(int(args.minerva_train_ex_class)) + \
-            "_tef" + str(int(args.minerva_train_ex_feats))
+            "_tec" + str(int(args.minerva_train_ex_class))
         run = wandb.init(project=args.wandb_project, reinit = True, name = modelName)
 
         print(f'\nLogging with Wandb id: {wandb.run.id}\n')
@@ -353,6 +402,7 @@ def main(cli_args):
             "epochs": args.num_train_epochs,
             "weight_decay": args.weight_decay,
             "learning rate": args.learning_rate,
+            "minerva learning rate": args.minerva_lr,
             "use_g": args.minerva_use_g,
             "minerva dropout": args.minerva_dropout,
             "train_class_reps": args.minerva_train_class_reps,

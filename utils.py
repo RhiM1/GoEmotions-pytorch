@@ -32,12 +32,12 @@ def compute_metrics(labels, preds, threshold = None, mode = None):
     results["accuracy" + addum] = accuracy_score(labels, preds)
     results["macro_precision" + addum], results["macro_recall" + addum], results[
         "macro_f1" + addum], _ = precision_recall_fscore_support(
-        labels, preds, average="macro")
+        labels, preds, average="macro", zero_division = 0)
     results["micro_precision" + addum], results["micro_recall" + addum], results[
         "micro_f1" + addum], _ = precision_recall_fscore_support(
-        labels, preds, average="micro")
+        labels, preds, average="micro", zero_division = 0)
     results["weighted_precision" + addum], results["weighted_recall" + addum], results[
         "weighted_f1" + addum], _ = precision_recall_fscore_support(
-        labels, preds, average="weighted")
+        labels, preds, average="weighted", zero_division = 0)
 
     return results
