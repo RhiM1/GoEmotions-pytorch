@@ -1,5 +1,5 @@
 {
-  "output_dir": "group-minerva_no-008",
+  "output_dir": "group-minerva_no-014",
   "data_dir": "data/group",
   "wandb_project": "goemotions-group",
   "tokenizer_name_or_path": "monologg/bert-base-cased-goemotions-group",
@@ -36,12 +36,13 @@
   "minerva_m": 0.5,
   "threshold": [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
   "minerva_dim_reduce": 32,
-  "minerva_class_dim": null,
+  "minerva_class_dim": 4,
   "minerva_use_g": true,
   "minerva_dropout": 0,
   "minerva_p_factor": 2,
   "minerva_train_class_reps": true,
   "minerva_train_ex_class": true,
   "minerva_train_ex_feats": false,
-  "num_ex": 32
+  "num_ex": 32,
+  "class_init": [[1, 0, 0, 0], [1, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
 }

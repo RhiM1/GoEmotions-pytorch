@@ -347,6 +347,7 @@ def main(cli_args):
         train_ex_class = args.minerva_train_ex_class,
         train_ex_feat = args.minerva_train_ex_feats,
         m = args.minerva_m,
+        class_init = torch.tensor(args.class_init, dtype = torch.float),
         num_classes = len(label_list)
     )
 

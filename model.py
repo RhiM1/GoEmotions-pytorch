@@ -413,8 +413,11 @@ class minerva_mse(nn.Module):
         self.train_class_reps = config.train_class_reps
         self.train_ex_class = config.train_ex_class
         self.class_dim = config.class_dim
+        self.class_init = config.class_init
         self.ex_classes = nn.Parameter(ex_classes, requires_grad = False)
         self.ex_feats = nn.Parameter(ex_classes, requires_grad = False)
+
+        print(f"class_init:\n{self.class_init}")
         
         if self.dim_reduce == None:
             self.dim_reduce = self.input_dim
@@ -434,7 +437,10 @@ class minerva_mse(nn.Module):
             if self.train_ex_class:
                 ex_class_add = torch.zeros(len(ex_classes), self.num_classes, dtype = torch.float)
         else:
-            class_reps = torch.rand(self.num_classes, self.class_dim) * 2 - 1
+            if self.class_init is None:
+                class_reps = torch.rand(self.num_classes, self.class_dim) * 2 - 1
+            else:
+                class_reps = self.class_init
             if self.train_ex_class:
                 ex_class_add = torch.zeros(len(ex_classes), self.class_dim, dtype = torch.float)
 
@@ -532,6 +538,7 @@ class MinervaConfig:
         train_ex_class = False,
         train_ex_feat = False,
         m = 0.5,
+        class_init = None,
         num_classes = 39
     ):
         # super().__init__(self)
@@ -545,6 +552,7 @@ class MinervaConfig:
         self.train_ex_class = train_ex_class
         self.train_ex_feat = train_ex_feat
         self.m = m
+        self.class_init = class_init
         self.num_classes = num_classes
 
 
