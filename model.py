@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
-from transformers import BertPreTrainedModel, BertModel, BertForSequenceClassification, BertConfig
+from transformers import BertPreTrainedModel, BertModel, BertForSequenceClassification, BertConfig, AutoModel
+# from sentence_transformers import SentenceTransformer
 from typing import Callable, Optional
 
 
@@ -400,7 +401,8 @@ class minerva_mse(nn.Module):
     def __init__(
         self, 
         config,
-        ex_classes
+        ex_classes,
+        ex_features = None
     ):
         super().__init__()
 
@@ -415,7 +417,7 @@ class minerva_mse(nn.Module):
         self.class_dim = config.class_dim
         self.class_init = config.class_init
         self.ex_classes = nn.Parameter(ex_classes, requires_grad = False)
-        self.ex_feats = nn.Parameter(ex_classes, requires_grad = False)
+        self.ex_features = nn.Parameter(ex_features, requires_grad = False)
 
         print(f"class_init:\n{self.class_init}")
         
@@ -456,8 +458,14 @@ class minerva_mse(nn.Module):
         # print(nn.functional.normalize(self.ex_classes.type(torch.float), p = 1, dim = 1) @ self.class_reps)
         # quit()
 
-    def forward(self, features, ex_features, p_factor = None):
+    def forward(self, features, ex_features = None, ex_classes = None, p_factor = None):
         
+        if ex_features is None:
+            ex_features = self.ex_features
+
+        if ex_classes is None:
+            ex_classes = self.ex_classes
+
         if p_factor is None:
             p_factor = self.p_factor
 
@@ -483,7 +491,7 @@ class minerva_mse(nn.Module):
         # print(f"a dim: {a.size()}")
 
   
-        ex_class_reps = nn.functional.normalize(self.ex_classes.type(torch.float), p = 1, dim = 1) @ self.class_reps
+        ex_class_reps = nn.functional.normalize(ex_classes.type(torch.float), p = 1, dim = 1) @ self.class_reps
         if self.train_ex_class:
             ex_class_reps += self.ex_class_add
 
@@ -660,3 +668,74 @@ class BertMinervaMSEForMultiLabelClassification(BertPreTrainedModel):
             outputs = (loss,) + outputs
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
+    
+
+
+
+    
+class STMinervaMSEForMultiLabelClassification(BertPreTrainedModel):
+    def __init__(self, config, minerva_config, exemplars):
+        super().__init__(config)
+        self.num_labels = config.num_labels
+
+        self.sentence_transformer = AutoModel.from_pretrained(config._name_or_path)
+        # self.sentence_transformer = AutoModel.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
+
+
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.exemplars = exemplars
+        self.minerva = minerva_mse(minerva_config, ex_classes = exemplars[3])
+
+        # self.loss_fct = nn.BCEWithLogitsLoss()
+        self.loss_fct = contrastive_loss(m = minerva_config.m)
+
+    def forward(
+            self,
+            input_ids=None,
+            attention_mask=None,
+            token_type_ids=None,
+            position_ids=None,
+            head_mask=None,
+            inputs_embeds=None,
+            labels=None,
+    ):
+        outputs = self.sentence_transformer(
+            input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
+        )
+        # print(f"outputs:\n{outputs}\n")
+        # print(f"attention_mask:\n{attention_mask}\n")
+        pooled_output = self.mean_pooling(outputs, attention_mask)
+
+        exemplar_output = self.sentence_transformer(
+            input_ids = self.exemplars[0],
+            attention_mask = self.exemplars[1],
+            token_type_ids = self.exemplars[2]
+        )
+        pooled_exemplar_output = self.mean_pooling(exemplar_output, self.exemplars[1])
+
+        # pooled_output = self.dropout(pooled_output)
+        distances = self.minerva(pooled_output, pooled_exemplar_output)
+        outputs = (-distances, ) + outputs[2:]  # add hidden states and attention if they are here
+
+        if labels is not None:
+            # print(f"\nechos size:\n{echos.size()}\n")
+            # print(f"\nechos size:\n{echos.size()}\n")
+            loss = self.loss_fct(distances, labels)
+            outputs = (loss,) + outputs
+
+        return outputs  # (loss), logits, (hidden_states), (attentions)
+
+    def mean_pooling(self, model_output, attention_mask):
+        token_embeddings = model_output[0] #First element of model_output contains all token embeddings
+        input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+        sum_embeddings = torch.sum(token_embeddings * input_mask_expanded, 1)
+        sum_mask = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
+        return sum_embeddings / sum_mask
+    
+    
+

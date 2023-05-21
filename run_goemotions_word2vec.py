@@ -11,12 +11,14 @@ from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 from tqdm import tqdm, trange
 from attrdict import AttrDict
 
-# from transformers import AdamW
-from transformers import get_linear_schedule_with_warmup
-from transformers import BertConfig
-from transformers import BertTokenizer
+from transformers import (
+    BertConfig,
+    BertTokenizer,
+    AdamW,
+    get_linear_schedule_with_warmup
+)
 
-from model import BertForMultiLabelClassification, BertMinervaForMultiLabelClassification, MinervaConfig, BertMinervaMSEForMultiLabelClassification
+from model import BertForMultiLabelClassification
 from utils import (
     init_logger,
     set_seed,
@@ -46,35 +48,12 @@ def train(args,
 
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ['bias', 'LayerNorm.weight']
-
     optimizer_grouped_parameters = [
-        {'params': [p for n, p in model.bert.named_parameters() if not any(nd in n for nd in no_decay)],
-         'weight_decay': args.weight_decay,
-         'lr': args.learning_rate},
-        {'params': [p for n, p in model.bert.named_parameters() if any(nd in n for nd in no_decay)], 
-         'weight_decay': 0.0,
-         'lr': args.learning_rate},
-        {'params': model.minerva.g.parameters(), 
-         'weight_decay': args.weight_decay,
-         'lr': args.learning_rate}
+        {'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+         'weight_decay': args.weight_decay},
+        {'params': [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
     ]
-
-    if args.minerva_train_class_reps:
-        optimizer_grouped_parameters.append(
-            {'params': model.minerva.class_reps, 
-            'weight_decay': 0.0,
-            'lr': args.minerva_lr}
-        )
-    if args.minerva_train_ex_class:
-        optimizer_grouped_parameters.append(
-            {'params': model.minerva.ex_class_add, 
-            'weight_decay': 0.0,
-            'lr': args.minerva_lr}
-        )
-
-    optimizer = torch.optim.AdamW(optimizer_grouped_parameters, eps=args.adam_epsilon)
-    # optimizer = torch.optim.AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
-    # optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
+    optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
     scheduler = get_linear_schedule_with_warmup(
         optimizer,
         num_warmup_steps=int(t_total * args.warmup_proportion),
@@ -134,6 +113,7 @@ def train(args,
                 model.zero_grad()
                 global_step += 1
 
+                
                 if args.logging_steps > 0 and global_step % args.logging_steps == 0:
                     
                     if not cli_args.skip_wandb:
@@ -145,15 +125,14 @@ def train(args,
                     results = evaluate(args, model, dev_dataset, "dev", global_step)
                     if args.evaluate_test_during_training:
                         evaluate(args, model, test_dataset, "test", global_step, threshold = results["threshold"])
-                    
+
+                # if args.logging_steps > 0 and global_step % args.logging_steps == 0:
+                #     if args.evaluate_test_during_training:
+                #         evaluate(args, model, test_dataset, "test", global_step)
+                #     else:
+                #         evaluate(args, model, dev_dataset, "dev", global_step)
 
                 if args.save_steps > 0 and global_step % args.save_steps == 0:
-                    # save class reps (if being trained)
-                    if args.minerva_train_class_reps:
-                        with open(args.output_dir + "/class_reps.txt", 'a') as f:
-                            f.write(f"global step: {global_step}\n")
-                            f.write(f"{model.minerva.class_reps}\n")
-
                     # Save model checkpoint
                     output_dir = os.path.join(args.output_dir, "checkpoint-{}".format(global_step))
                     if not os.path.exists(output_dir):
@@ -225,11 +204,8 @@ def evaluate(args, model, eval_dataset, mode, global_step=None, threshold = None
     results = {
         str(mode) + "_loss": eval_loss
     }
-    
-    preds_ = np.copy(preds)
-    print(f"\npreds_\n{preds_}\n")
-    print(f"\nclass_reps:\n{model.minerva.class_reps}\n")
 
+    preds_ = np.copy(preds)
     if threshold is None:
         best_f1 = 0.0
         for threshold in args.threshold:
@@ -302,18 +278,6 @@ def main(cli_args):
         args = AttrDict(json.load(f))
     logger.info("Training/evaluation parameters {}".format(args))
 
-    try:
-        x = args.minerva_lr
-    except:
-        print("Using global learning rate for Minerva")
-        args.minerva_lr = args.learning_rate
-
-    
-    try:
-        x = args.minerva_m
-    except:
-        args.minerva_m = 0.5
-
     args.output_dir = os.path.join(args.ckpt_dir, args.output_dir)
 
     init_logger()
@@ -327,86 +291,46 @@ def main(cli_args):
         num_labels=len(label_list),
         finetuning_task=args.task,
         id2label={str(i): label for i, label in enumerate(label_list)},
-        label2id={label: i for i, label in enumerate(label_list)},
-        minerva_dim_reduce = args.minerva_dim_reduce if args.minerva_dim_reduce else None
+        label2id={label: i for i, label in enumerate(label_list)}
     )
-
-    minerva_config = MinervaConfig(
-        input_dim = config.hidden_size,
-        dim_reduce = args.minerva_dim_reduce,
-        class_dim = args.minerva_class_dim,
-        use_g = args.minerva_use_g,
-        dropout = args.minerva_dropout,
-        p_factor = args.minerva_p_factor,
-        train_class_reps = args.minerva_train_class_reps,
-        train_ex_class = args.minerva_train_ex_class,
-        train_ex_feat = args.minerva_train_ex_feats,
-        m = args.minerva_m,
-        num_classes = len(label_list)
-    )
-
     tokenizer = BertTokenizer.from_pretrained(
         args.tokenizer_name_or_path,
     )
-    # Load dataset
-    train_dataset = load_and_cache_examples(args, tokenizer, mode="train") if args.train_file else None
-
-    exIDX = torch.randperm(len(train_dataset))[0:args.num_ex]
-
-    exemplars = train_dataset[exIDX]
-
-    dev_dataset = load_and_cache_examples(args, tokenizer, mode="dev") if args.dev_file else None
-    test_dataset = load_and_cache_examples(args, tokenizer, mode="test") if args.test_file else None
-
+    model = BertForMultiLabelClassification.from_pretrained(
+        args.model_name_or_path,
+        config=config
+    )
 
     # GPU or CPU
     args.device = "cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu"
-    exemplars = [thing.to(args.device) for thing in exemplars]
-    model = BertMinervaMSEForMultiLabelClassification.from_pretrained(
-        args.model_name_or_path,
-        config=config,
-        minerva_config = minerva_config,
-        exemplars = exemplars
-    )
-
     model.to(args.device)
+
+    # Load dataset
+    train_dataset = load_and_cache_examples(args, tokenizer, mode="train") if args.train_file else None
+    dev_dataset = load_and_cache_examples(args, tokenizer, mode="dev") if args.dev_file else None
+    test_dataset = load_and_cache_examples(args, tokenizer, mode="test") if args.test_file else None
 
     if dev_dataset is None:
         args.evaluate_test_during_training = True  # If there is no dev dataset, only use test dataset
 
+
     if not cli_args.skip_wandb:
-        modelName = args.output_dir.split("-")[2] + \
+        modelName = args.output_dir.split("-")[1] + \
             "_" + args.model_type + \
-            "_ex" + str(args.num_ex) + \
             "_wd" + str(args.weight_decay) + \
-            "_lr" + str(args.learning_rate) + \
-            "_mlr" + str(args.minerva_lr) + \
-            "_m" + str(args.minerva_m) + \
-            "_p" + str(args.minerva_p_factor) + \
-            "_ug" + str(int(args.minerva_use_g)) + \
-            "_dr" + str(int(args.minerva_dim_reduce)) + \
-            "_cd" + str(args.minerva_class_dim) + \
-            "_tcr" + str(int(args.minerva_train_class_reps)) + \
-            "_tec" + str(int(args.minerva_train_ex_class))
+            "_lr" + str(args.learning_rate)
         run = wandb.init(project=args.wandb_project, reinit = True, name = modelName)
 
         print(f'\nLogging with Wandb id: {wandb.run.id}\n')
 
         wandb_config={
-            "weight decay": args.weight_decay,
-            "p-factor": args.minerva_p_factor,
-            "num ex": args.num_ex,
             "dataset": "GoEmotions",
             "epochs": args.num_train_epochs,
             "weight_decay": args.weight_decay,
-            "learning rate": args.learning_rate,
-            "minerva learning rate": args.minerva_lr,
-            "use_g": args.minerva_use_g,
-            "minerva dropout": args.minerva_dropout,
-            "train_class_reps": args.minerva_train_class_reps,
-            "train_ex_class": args.minerva_train_ex_class,
-            "train_ex_feats": args.minerva_train_ex_feats
+            "learning rate": args.learning_rate
         }
+
+
 
     if args.do_train:
         global_step, tr_loss = train(args, model, tokenizer, train_dataset, dev_dataset, test_dataset)
@@ -425,7 +349,7 @@ def main(cli_args):
         logger.info("Evaluate the following checkpoints: %s", checkpoints)
         for checkpoint in checkpoints:
             global_step = checkpoint.split("-")[-1]
-            model = BertMinervaMSEForMultiLabelClassification.from_pretrained(checkpoint)
+            model = BertForMultiLabelClassification.from_pretrained(checkpoint)
             model.to(args.device)
             result = evaluate(args, model, test_dataset, mode="test", global_step=global_step)
             result = dict((k + "_{}".format(global_step), v) for k, v in result.items())

@@ -14,9 +14,9 @@ from attrdict import AttrDict
 # from transformers import AdamW
 from transformers import get_linear_schedule_with_warmup
 from transformers import BertConfig
-from transformers import BertTokenizer
+from transformers import BertTokenizer, AutoTokenizer
 
-from model import BertForMultiLabelClassification, BertMinervaForMultiLabelClassification, MinervaConfig, BertMinervaMSEForMultiLabelClassification
+from model import BertForMultiLabelClassification, BertMinervaForMultiLabelClassification, MinervaConfig, BertMinervaMSEForMultiLabelClassification, STMinervaMSEForMultiLabelClassification
 from utils import (
     init_logger,
     set_seed,
@@ -46,17 +46,36 @@ def train(args,
 
     # Prepare optimizer and schedule (linear warmup and decay)
     no_decay = ['bias', 'LayerNorm.weight']
+    
+    if args.freeze_transformer:
+        print("Freezing transformer model parameters...")
+        for param in model.sentence_transformer.parameters():
+            param.requires_grad = False
 
-    optimizer_grouped_parameters = [
-        {'params': [p for n, p in model.bert.named_parameters() if not any(nd in n for nd in no_decay)],
-         'weight_decay': args.weight_decay,
-         'lr': args.learning_rate},
-        {'params': [p for n, p in model.bert.named_parameters() if any(nd in n for nd in no_decay)], 
-         'weight_decay': 0.0,
-         'lr': args.learning_rate},
-        {'params': model.minerva.g.parameters(), 
-         'weight_decay': args.weight_decay,
-         'lr': args.learning_rate}
+        optimizer_grouped_parameters = [
+            # {'params': [p for n, p in model.bert.named_parameters() if not any(nd in n for nd in no_decay)],
+            #  'weight_decay': args.weight_decay,
+            #  'lr': args.learning_rate},
+            # {'params': [p for n, p in model.bert.named_parameters() if any(nd in n for nd in no_decay)], 
+            #  'weight_decay': 0.0,
+            #  'lr': args.learning_rate},
+            {'params': model.minerva.g.parameters(), 
+            'weight_decay': args.weight_decay,
+            'lr': args.learning_rate}
+        ]
+
+    else:
+        print("Training transformer model parameters...")
+        optimizer_grouped_parameters = [
+            {'params': [p for n, p in model.sentence_transformer.named_parameters() if not any(nd in n for nd in no_decay)],
+             'weight_decay': args.weight_decay,
+             'lr': args.learning_rate},
+            {'params': [p for n, p in model.sentence_transformer.named_parameters() if any(nd in n for nd in no_decay)], 
+             'weight_decay': 0.0,
+             'lr': args.learning_rate},
+            {'params': model.minerva.g.parameters(), 
+            'weight_decay': args.weight_decay,
+            'lr': args.learning_rate}
     ]
 
     if args.minerva_train_class_reps:
@@ -242,7 +261,7 @@ def evaluate(args, model, eval_dataset, mode, global_step=None, threshold = None
                 best_f1 = result['weighted_f1_' + mode]
                 results.update(result)
                 results['threshold'] = threshold
-
+                
                 detailed_results = {}
 
                 for emotion in range(model.num_labels):
@@ -257,8 +276,10 @@ def evaluate(args, model, eval_dataset, mode, global_step=None, threshold = None
         preds_[preds <= threshold] = 0
         result = compute_metrics(out_label_ids, preds_, mode = mode)
         # print(f"threshold: {threshold}, weighted_f1: {result['weighted_f1']:>0.2f}")
+        # if result['weighted_f1_' + mode] > best_f1:
+        #     best_f1 = result['weighted_f1_' + mode]
         results.update(result)
-
+            # results['threshold'] = threshold
         detailed_results = {}
 
         for emotion in range(model.num_labels):
@@ -284,7 +305,7 @@ def evaluate(args, model, eval_dataset, mode, global_step=None, threshold = None
             logger.info("  {} = {}".format(key, str(results[key])))
             f_w.write("  {} = {}\n".format(key, str(results[key])))
 
-
+    
     output_eval_file = os.path.join(output_dir, "{}-{}_detailed.txt".format(mode, global_step) if global_step else "{}.txt".format(mode))
     with open(output_eval_file, "w") as f_w:
         logger.info("***** Eval results on {} dataset *****".format(mode))
@@ -342,10 +363,11 @@ def main(cli_args):
         train_ex_class = args.minerva_train_ex_class,
         train_ex_feat = args.minerva_train_ex_feats,
         m = args.minerva_m,
+        class_init = torch.tensor(args.class_init, dtype = torch.float),
         num_classes = len(label_list)
     )
 
-    tokenizer = BertTokenizer.from_pretrained(
+    tokenizer = AutoTokenizer.from_pretrained(
         args.tokenizer_name_or_path,
     )
     # Load dataset
@@ -362,8 +384,8 @@ def main(cli_args):
     # GPU or CPU
     args.device = "cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu"
     exemplars = [thing.to(args.device) for thing in exemplars]
-    model = BertMinervaMSEForMultiLabelClassification.from_pretrained(
-        args.model_name_or_path,
+    model = STMinervaMSEForMultiLabelClassification(
+        # args.model_name_or_path,
         config=config,
         minerva_config = minerva_config,
         exemplars = exemplars
@@ -425,7 +447,7 @@ def main(cli_args):
         logger.info("Evaluate the following checkpoints: %s", checkpoints)
         for checkpoint in checkpoints:
             global_step = checkpoint.split("-")[-1]
-            model = BertMinervaMSEForMultiLabelClassification.from_pretrained(checkpoint)
+            model = STMinervaMSEForMultiLabelClassification.from_pretrained(checkpoint)
             model.to(args.device)
             result = evaluate(args, model, test_dataset, mode="test", global_step=global_step)
             result = dict((k + "_{}".format(global_step), v) for k, v in result.items())
@@ -436,7 +458,7 @@ def main(cli_args):
             for key in sorted(results.keys()):
                 f_w.write("{} = {}\n".format(key, str(results[key])))
 
-
+    
     if not cli_args.skip_wandb:
         run.finish()
 

@@ -547,3 +547,65 @@ class BertMinervaMSEForMultiLabelClassification(BertPreTrainedModel):
             outputs = (loss,) + outputs
 
         return outputs  # (loss), logits, (hidden_states), (attentions)
+    
+
+    
+    
+class SentenceMinervaMSEForMultiLabelClassification(BertPreTrainedModel):
+    def __init__(self, config, minerva_config, exemplars):
+        super().__init__(config)
+        self.num_labels = config.num_labels
+
+        self.bert = BertModel(config)
+        self.dropout = nn.Dropout(config.hidden_dropout_prob)
+        self.exemplars = exemplars
+        class_reps = torch.rand(config.num_labels, minerva_config.class_dim, dtype = torch.float)
+        self.class_reps = nn.Parameter(
+            class_reps, 
+            requires_grad = minerva_config.train_class_reps
+        )
+        ex_init_reps = nn.functional.normalize(self.exemplars[3], p = 1, dim = 1) @ self.class_reps
+        self.minerva = minerva_base(minerva_config, ex_classes = ex_init_reps)
+
+        self.loss_fct = nn.BCEWithLogitsLoss()
+
+    def forward(
+            self,
+            input_ids=None,
+            attention_mask=None,
+            token_type_ids=None,
+            position_ids=None,
+            head_mask=None,
+            inputs_embeds=None,
+            labels=None,
+    ):
+        outputs = self.bert(
+            input_ids,
+            attention_mask=attention_mask,
+            token_type_ids=token_type_ids,
+            position_ids=position_ids,
+            head_mask=head_mask,
+            inputs_embeds=inputs_embeds,
+        )
+        pooled_output = outputs[1]
+        exemplar_output = self.bert(
+            input_ids = self.exemplars[0],
+            attention_mask = self.exemplars[1],
+            token_type_ids = self.exemplars[2]
+        )
+        pooled_exemplar_output = exemplar_output[1]
+
+        pooled_output = self.dropout(pooled_output)
+        echos = self.minerva(pooled_output, pooled_exemplar_output)
+        distances = torch.cdist(echos, self.class_reps)
+
+        outputs = (distances, echos,) + outputs[2:]  # add hidden states and attention if they are here
+
+
+        if labels is not None:
+            # print(f"\nechos size:\n{echos.size()}\n")
+            # print(f"\nechos size:\n{echos.size()}\n")
+            loss = self.loss_fct(echos, self.class_reps)
+            outputs = (loss,) + outputs
+
+        return outputs  # (loss), logits, (hidden_states), (attentions)
