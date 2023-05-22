@@ -10,6 +10,7 @@ import torch
 from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 from tqdm import tqdm, trange
 from attrdict import AttrDict
+import gensim.downloader as api
 
 from transformers import (
     BertConfig,
@@ -28,6 +29,7 @@ from data_loader import (
     load_and_cache_examples,
     GoEmotionsProcessor
 )
+from w2v_dataset import get_word2vec_dataset
 
 logger = logging.getLogger(__name__)
 
@@ -283,22 +285,24 @@ def main(cli_args):
     init_logger()
     set_seed(args)
 
-    processor = GoEmotionsProcessor(args)
-    label_list = processor.get_labels()
+    # processor = GoEmotionsProcessor(args)
+    # label_list = processor.get_labels()
 
-    config = BertConfig.from_pretrained(
-        args.model_name_or_path,
-        num_labels=len(label_list),
-        finetuning_task=args.task,
-        id2label={str(i): label for i, label in enumerate(label_list)},
-        label2id={label: i for i, label in enumerate(label_list)}
-    )
-    tokenizer = BertTokenizer.from_pretrained(
-        args.tokenizer_name_or_path,
-    )
+    # config = BertConfig.from_pretrained(
+    #     args.model_name_or_path,
+    #     num_labels=len(label_list),
+    #     finetuning_task=args.task,
+    #     id2label={str(i): label for i, label in enumerate(label_list)},
+    #     label2id={label: i for i, label in enumerate(label_list)}
+    # )
+    # tokenizer = BertTokenizer.from_pretrained(
+    #     args.tokenizer_name_or_path,
+    # )
+
+    w2v_model = api.load("word2vec-google-news-300")
     model = BertForMultiLabelClassification.from_pretrained(
         args.model_name_or_path,
-        config=config
+        config=minerva_config
     )
 
     # GPU or CPU
@@ -306,9 +310,12 @@ def main(cli_args):
     model.to(args.device)
 
     # Load dataset
-    train_dataset = load_and_cache_examples(args, tokenizer, mode="train") if args.train_file else None
-    dev_dataset = load_and_cache_examples(args, tokenizer, mode="dev") if args.dev_file else None
-    test_dataset = load_and_cache_examples(args, tokenizer, mode="test") if args.test_file else None
+    # train_dataset = load_and_cache_examples(args, tokenizer, mode="train") if args.train_file else None
+    # dev_dataset = load_and_cache_examples(args, tokenizer, mode="dev") if args.dev_file else None
+    # test_dataset = load_and_cache_examples(args, tokenizer, mode="test") if args.test_file else None
+    train_dataset = get_word2vec_dataset(args.data_dir, mode = 'train', model = w2v_model) if args.train_file else None
+    dev_dataset = get_word2vec_dataset(args.data_dir, mode = 'dev', model = w2v_model) if args.train_file else None
+    test_dataset = get_word2vec_dataset(args.data_dir, mode = 'test', model = w2v_model) if args.train_file else None
 
     if dev_dataset is None:
         args.evaluate_test_during_training = True  # If there is no dev dataset, only use test dataset
