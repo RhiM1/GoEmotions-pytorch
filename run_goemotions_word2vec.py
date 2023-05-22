@@ -362,13 +362,32 @@ def main(cli_args):
 
 
     if not cli_args.skip_wandb:
-        modelName = args.output_dir.split("-")[1] + \
-            "_" + args.model_type + \
-            "_wd" + str(args.weight_decay) + \
-            "_lr" + str(args.learning_rate)
-        run = wandb.init(project=args.wandb_project, reinit = True, name = modelName)
+        if args.model_type == 'w2v_ffnn':
+            modelName = args.output_dir.split("-")[2] + \
+                "_" + args.model_type + \
+                "_fd" + str(args.feat_dim) + \
+                "_bs" + str(args.train_batch_size) + \
+                "_wd" + str(args.weight_decay) + \
+                "_lr" + str(args.learning_rate)
+            run = wandb.init(project=args.wandb_project, reinit = True, name = modelName)
+        elif args.model_type == 'w2v_minerva':
+            modelName = args.output_dir.split("-")[2] + \
+                "_" + args.model_type + \
+                "_fd" + str(args.feat_dim) + \
+                "_bs" + str(args.train_batch_size) + \
+                "_wd" + str(args.weight_decay) + \
+                "_lr" + str(args.learning_rate) + \
+                "_ex" + str(args.minerva_num_ex) + \
+                "_cd" + str(args.minerva_class_dim) + \
+                "_ug" + str(int(args.minerva_use_g)) + \
+                "_p" + str(args.minerva_p_factor) + \
+                "_tcr" + str(int(args.minerva_train_class_reps)) + \
+                "_tec" + str(int(args.minerve_train_ex_class)) + \
+                "_tef" + str(int(args.minerva_train_ex_feats))
+            run = wandb.init(project=args.wandb_project, reinit = True, name = modelName)
 
-        print(f'\nLogging with Wandb id: {wandb.run.id}\n')
+
+
 
         wandb_config={
             "dataset": "GoEmotions",
@@ -377,6 +396,7 @@ def main(cli_args):
             "learning rate": args.learning_rate
         }
 
+        print(f'\nLogging with Wandb id: {wandb.run.id}\n')
 
 
     if args.do_train:
