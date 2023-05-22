@@ -1,6 +1,6 @@
 import torch
 from torch.utils.data import TensorDataset
-from sentence_transformers import SentenceTransformer, SentencesDataset
+# from sentence_transformers import SentenceTransformer, SentencesDataset
 import gensim.downloader as api
 import re
 

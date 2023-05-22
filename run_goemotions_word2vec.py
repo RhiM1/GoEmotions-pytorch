@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader, RandomSampler, SequentialSampler
 from tqdm import tqdm, trange
 from attrdict import AttrDict
 import gensim.downloader as api
+from gensim.models import Word2Vec
 
 from transformers import (
     BertConfig,
@@ -19,7 +20,7 @@ from transformers import (
     get_linear_schedule_with_warmup
 )
 
-from model import BertForMultiLabelClassification
+from model import BertForMultiLabelClassification, ffnn, minerva
 from utils import (
     init_logger,
     set_seed,
@@ -36,7 +37,6 @@ logger = logging.getLogger(__name__)
 
 def train(args,
           model,
-          tokenizer,
           train_dataset,
           dev_dataset=None,
           test_dataset=None):
@@ -49,11 +49,12 @@ def train(args,
         t_total = len(train_dataloader) // args.gradient_accumulation_steps * args.num_train_epochs
 
     # Prepare optimizer and schedule (linear warmup and decay)
-    no_decay = ['bias', 'LayerNorm.weight']
+    # no_decay = ['bias', 'LayerNorm.weight']
     optimizer_grouped_parameters = [
-        {'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
-         'weight_decay': args.weight_decay},
-        {'params': [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], 'weight_decay': 0.0}
+    #     {'params': [p for n, p in model.named_parameters() if not any(nd in n for nd in no_decay)],
+    #      'weight_decay': args.weight_decay},
+    #     {'params': [p for n, p in model.named_parameters() if any(nd in n for nd in no_decay)], 'weight_decay': 0.0},
+        {'params': model.parameters(), 'weight_decay': args.weight_decay}
     ]
     optimizer = AdamW(optimizer_grouped_parameters, lr=args.learning_rate, eps=args.adam_epsilon)
     scheduler = get_linear_schedule_with_warmup(
@@ -90,14 +91,14 @@ def train(args,
             model.train()
             batch = tuple(t.to(args.device) for t in batch)
             inputs = {
-                "input_ids": batch[0],
-                "attention_mask": batch[1],
-                "token_type_ids": batch[2],
-                "labels": batch[3]
+                "features": batch[0],
+                # "attention_mask": batch[1],
+                # "token_type_ids": batch[2],
+                "labels": batch[1]
             }
-            outputs = model(**inputs)
+            loss, _ = model(**inputs)
 
-            loss = outputs[0]
+            # loss = outputs[0]
 
             if args.gradient_accumulation_steps > 1:
                 loss = loss / args.gradient_accumulation_steps
@@ -143,7 +144,7 @@ def train(args,
                         model.module if hasattr(model, "module") else model
                     )
                     model_to_save.save_pretrained(output_dir)
-                    tokenizer.save_pretrained(output_dir)
+                    # tokenizer.save_pretrained(output_dir)
 
                     torch.save(args, os.path.join(output_dir, "training_args.bin"))
                     logger.info("Saving model checkpoint to {}".format(output_dir))
@@ -185,13 +186,12 @@ def evaluate(args, model, eval_dataset, mode, global_step=None, threshold = None
 
         with torch.no_grad():
             inputs = {
-                "input_ids": batch[0],
-                "attention_mask": batch[1],
-                "token_type_ids": batch[2],
-                "labels": batch[3]
+                "features": batch[0],
+                # "attention_mask": batch[1],
+                # "token_type_ids": batch[2],
+                "labels": batch[1]
             }
-            outputs = model(**inputs)
-            tmp_eval_loss, logits = outputs[:2]
+            tmp_eval_loss, logits  = model(**inputs)
 
             eval_loss += tmp_eval_loss.mean().item()
         nb_eval_steps += 1
@@ -223,7 +223,7 @@ def evaluate(args, model, eval_dataset, mode, global_step=None, threshold = None
 
                 detailed_results = {}
 
-                for emotion in range(model.num_labels):
+                for emotion in range(model.config['num_labels']):
                     detailed_results[str(emotion) + "_tp"] = np.logical_and(preds_[:, emotion] == 1, out_label_ids[:, emotion] == 1).astype(np.float32).sum(axis = 0)
                     detailed_results[str(emotion) + "_tn"] = np.logical_and(preds_[:, emotion] == 0, out_label_ids[:, emotion] == 0).astype(np.float32).sum(axis = 0)
                     detailed_results[str(emotion) + "_fp"] = np.logical_and(preds_[:, emotion] == 1, out_label_ids[:, emotion] == 0).astype(np.float32).sum(axis = 0)
@@ -239,7 +239,7 @@ def evaluate(args, model, eval_dataset, mode, global_step=None, threshold = None
 
         detailed_results = {}
 
-        for emotion in range(model.num_labels):
+        for emotion in range(model.config['num_labels']):
             detailed_results[str(emotion) + "_tp"] = np.logical_and(preds_[:, emotion] == 1, out_label_ids[:, emotion] == 1).astype(np.float32).sum(axis = 0)
             detailed_results[str(emotion) + "_tn"] = np.logical_and(preds_[:, emotion] == 0, out_label_ids[:, emotion] == 0).astype(np.float32).sum(axis = 0)
             detailed_results[str(emotion) + "_fp"] = np.logical_and(preds_[:, emotion] == 1, out_label_ids[:, emotion] == 0).astype(np.float32).sum(axis = 0)
@@ -299,15 +299,14 @@ def main(cli_args):
     #     args.tokenizer_name_or_path,
     # )
 
-    w2v_model = api.load("word2vec-google-news-300")
-    model = BertForMultiLabelClassification.from_pretrained(
-        args.model_name_or_path,
-        config=minerva_config
-    )
+
+    w2v_model = api.load(args.model_name_or_path)
+    # Word2Vec.keyedvectors.KeyedVectors.load_word2vec_format()
+    # w2v_model = Word2Vec.load(args.model_name_or_path)
+    # w2v_model.save("w2v.model")
 
     # GPU or CPU
     args.device = "cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu"
-    model.to(args.device)
 
     # Load dataset
     # train_dataset = load_and_cache_examples(args, tokenizer, mode="train") if args.train_file else None
@@ -316,6 +315,47 @@ def main(cli_args):
     train_dataset = get_word2vec_dataset(args.data_dir, mode = 'train', model = w2v_model) if args.train_file else None
     dev_dataset = get_word2vec_dataset(args.data_dir, mode = 'dev', model = w2v_model) if args.train_file else None
     test_dataset = get_word2vec_dataset(args.data_dir, mode = 'test', model = w2v_model) if args.train_file else None
+
+    example_feats, example_classes = train_dataset[0]
+    print(f"features size: {example_feats.size(0)}, num_classes: {example_classes.size(0)}")
+
+
+
+
+
+    if args.model_type == 'w2v_ffnn':
+        config = {'input_dim': example_feats.size(0),
+                  'feat_dim': args.feat_dim,
+                  'num_labels': example_classes.size(0),
+                  'dropout': args.dropout}
+    
+        model = ffnn(
+            config = config
+        )
+    elif args.model_type == 'w2v_minerva':
+        config = {'input_dim': example_feats.size(0),
+                  'feat_dim': args.feat_dim,
+                  'num_labels': example_classes.size(0),
+                  'dropout': args.dropout,
+                  'use_g': args.minerva_use_g,
+                  'class_dim': args.minerva_class_dim,
+                  'p_factor': args.minerva_p_factor,
+                  'train_class_reps': args.minerva_train_class_reps,
+                  'train_ex_class': args.minerva_train_ex_class,
+                  'train_ex_feats': args.minerva_train_ex_feats
+                  }
+        
+        exIDX = torch.randperm(len(train_dataset))[0:args.minerva_num_ex]
+        exemplars = train_dataset[exIDX]
+        
+        model = minerva(
+            ex_features = exemplars[0],
+            ex_classes = exemplars[1],
+            ex_IDX = exIDX,
+            config = config
+        )
+
+    model.to(args.device)
 
     if dev_dataset is None:
         args.evaluate_test_during_training = True  # If there is no dev dataset, only use test dataset
@@ -340,7 +380,7 @@ def main(cli_args):
 
 
     if args.do_train:
-        global_step, tr_loss = train(args, model, tokenizer, train_dataset, dev_dataset, test_dataset)
+        global_step, tr_loss = train(args, model, train_dataset, dev_dataset, test_dataset)
         logger.info(" global_step = {}, average loss = {}".format(global_step, tr_loss))
 
     results = {}
@@ -355,8 +395,13 @@ def main(cli_args):
             logging.getLogger("transformers.modeling_utils").setLevel(logging.WARN)  # Reduce logging
         logger.info("Evaluate the following checkpoints: %s", checkpoints)
         for checkpoint in checkpoints:
-            global_step = checkpoint.split("-")[-1]
-            model = BertForMultiLabelClassification.from_pretrained(checkpoint)
+            global_step = checkpoint.split("-")[-1]    
+            if args.model_type == 'w2v_ffnn':
+                model = ffnn(
+                    load_dir = checkpoint
+                )
+            elif args.model_type == 'w2v_minerva':
+                model = minerva()
             model.to(args.device)
             result = evaluate(args, model, test_dataset, mode="test", global_step=global_step)
             result = dict((k + "_{}".format(global_step), v) for k, v in result.items())

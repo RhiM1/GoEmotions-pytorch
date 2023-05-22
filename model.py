@@ -3,6 +3,41 @@ import torch.nn as nn
 from transformers import BertPreTrainedModel, BertModel, BertForSequenceClassification, BertConfig, AutoModel
 # from sentence_transformers import SentenceTransformer
 from typing import Callable, Optional
+import os
+from attrdict import AttrDict
+import json
+
+
+class base_model(nn.Module):
+
+    def __init__(
+            self, 
+            config = None, 
+            load_dir = None
+        ):
+        super(base_model, self).__init__()
+
+        if load_dir is not None:
+            self.load(load_dir = load_dir)
+        elif config is None:
+            print("Must provide either save location or config file for loading model")
+        else:
+            self.config = config
+
+    def save_pretrained(self, output_dir):    
+        torch.save(self.config, output_dir + "/config.json")
+        torch.save(self.state_dict, output_dir + "/model.mod")
+             
+
+    def load_pretrained(self, load_dir):
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        config = torch.load(load_dir + "/config.json")
+        state_dict = torch.load(load_dir + "/model.mod")
+        self.load_state_dict(state_dict)
+        
+
+
+
 
 
 class BertForMultiLabelClassification(BertPreTrainedModel):
@@ -52,7 +87,45 @@ class BertForMultiLabelClassification(BertPreTrainedModel):
 
 
 
-class minerva(nn.Module):
+
+class ffnn(base_model):
+    # Exemplar model incorporating multi-head attention for exemplar weighting, 
+    # with separate attention for the acoustic and phonetic information.
+    def __init__(
+            self,
+            config = None,
+            load_dir = None
+            ):
+        super(ffnn, self).__init__(config, load_dir)
+
+        # input_dim = config['input_dim']
+        # embed_dim = config['embed_dim']
+        # num_labels = config['num_labels']
+        # dropout = config['dropout']
+        self.loss_fct = nn.BCEWithLogitsLoss()
+        # self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        
+        # Neural network f
+        self.fnn_stack = nn.Sequential(
+            nn.Linear(config['input_dim'], config['feat_dim']),
+            nn.Dropout(p = config['dropout']),
+            nn.ReLU(),
+            nn.Linear(config['feat_dim'], config['feat_dim']),
+            nn.Dropout(p = config['dropout']),
+            nn.ReLU(),
+            nn.Linear(config['feat_dim'], config['num_labels'])
+        )
+
+    def forward(self, features, labels):
+
+        logits = self.fnn_stack(features)
+        loss = self.loss_fct(logits, labels)
+        
+        return loss, logits
+
+
+
+class minerva(base_model):
     # Exemplar model incorporating multi-head attention for exemplar weighting, 
     # with separate attention for the acoustic and phonetic information.
     def __init__(
@@ -60,40 +133,38 @@ class minerva(nn.Module):
         ex_features,
         ex_classes,
         ex_IDX,
-        dim_reduce = None,
-        class_dim = None,
-        use_g = True,
-        dropout = 0,
-        p_factor = 1,
-        train_class_rep = False,
-        train_ex_class = False,
-        train_ex_feat = False,
-        num_classes = 39
+        config = None,
+        load_dir = None
     ):
-        super().__init__()
+        super(minerva, self).__init__(config = config, load_dir = load_dir)
 
-        self.dim_reduce = dim_reduce
-        self.class_dim = class_dim
-        self.use_g = use_g
-        self.dropout = dropout
-        self.p_factor = p_factor
-        self.train_class_reps = train_class_rep
-        self.train_ex_class = train_ex_class
-        self.train_ex_feat = train_ex_feat
-        self.num_classes = num_classes
+        self.config = config
+        self.loss_fct = nn.BCEWithLogitsLoss()
+
+        # input_dim
+        # self.feat_dim = feat_dim
+        # self.num_labels = num_labels
+        # self.dropout = dropout
         
-        if dim_reduce == None:
-            dim_reduce = ex_features.size()[1]
+        # self.use_g = use_g
+        # self.class_dim = class_dim
+        # self.p_factor = p_factor
+        # self.train_class_reps = train_class_rep
+        # self.train_ex_class = train_ex_class
+        # self.train_ex_feats = train_ex_feat
+        
+        if self.config['feat_dim'] == None:
+            self.config['feat_dim'] = self.config['input_dim']
 
-        if use_g:
+        if config['use_g']:
             self.g = nn.Linear(
-                in_features = ex_features.size()[1],
-                out_features = dim_reduce,
+                in_features = self.config['input_dim'],
+                out_features = self.config['feat_dim'],
                 bias = False
             )
 
-        if dropout > 0:
-            self.do = nn.Dropout(p = dropout)
+        if config['dropout'] > 0:
+            self.do = nn.Dropout(p = config['dropout'])
         self.set_exemplars(ex_features, ex_classes, ex_IDX)
         self.initialise_exemplars()
 
@@ -106,25 +177,25 @@ class minerva(nn.Module):
 
     def initialise_exemplars(self):
 
-        if self.class_dim is None:
-            class_reps = nn.functional.one_hot(torch.arange(self.num_classes)).type(torch.float)
-            if self.train_ex_class:
-                add_ex_reps = torch.zeros(len(self.ex_classes), self.num_classes, dtype = torch.float)
+        if self.config['class_dim'] is None:
+            class_reps = nn.functional.one_hot(torch.arange(self.config['num_labels'])).type(torch.float)
+            if self.config['train_ex_class']:
+                add_ex_reps = torch.zeros(len(self.ex_classes), self.config['num_labels'], dtype = torch.float)
         else:
-            class_reps = torch.rand(self.num_classes, self.num_classes, dtype = torch.float)
-            if self.train_ex_class:
-                add_ex_reps = torch.zeros(len(self.ex_classes), self.num_classes, dtype = torch.float)
+            class_reps = torch.rand(self.config['num_labels'], self.config['num_labels'], dtype = torch.float)
+            if self.config['train_ex_class']:
+                add_ex_reps = torch.zeros(len(self.ex_classes), self.config['num_labels'], dtype = torch.float)
 
         self.base_class_reps = nn.Parameter(class_reps, requires_grad = False)
 
-        if self.train_class_reps:
+        if self.config['train_class_reps']:
             self.add_class_reps = nn.Parameter(torch.zeros_like(self.base_class_reps))
 
-        if self.train_ex_class:
+        if self.config['train_ex_class']:
             self.add_ex_reps = nn.Parameter(add_ex_reps)
 
-        if self.train_ex_feat:
-            add_feats = torch.zeros(len(self.ex_features), self.dim_reduce, dtype = torch.float)
+        if self.config['train_ex_feats']:
+            add_feats = torch.zeros(len(self.ex_features), self.config['feat_dim'], dtype = torch.float)
             self.add_feats = nn.Parameter(add_feats)
         
         print()
@@ -135,7 +206,7 @@ class minerva(nn.Module):
 
 
 
-    def forward(self, features, p_factor = None):
+    def forward(self, features, labels, p_factor = None):
         
         # features has dim (batch_size, input_dim)
         # ex_features has dim (ex_batch_size, input_dim)
@@ -143,30 +214,30 @@ class minerva(nn.Module):
         # ex_reps has dim (num_classes, phone_dim)
 
         if p_factor is None:
-            p_factor = self.p_factor
+            p_factor = self.config['p_factor']
 
-        if self.use_g:
+        if self.config['use_g']:
             features = self.g(features)
             ex_features = self.g(self.ex_features)
         else:
             ex_features = self.ex_features
 
-        if self.train_ex_feat:
+        if self.config['train_ex_feats']:
             ex_features += self.add_feats
         
-        if self.train_class_reps:
+        if self.config['train_class_reps']:
             class_reps = self.base_class_reps + self.add_class_reps
         else:
             class_reps = self.base_class_reps
 
-        if self.train_ex_class:
+        if self.config['train_ex_class']:
             # ex_class_reps = class_reps[self.ex_classes] + self.add_ex_reps
             ex_class_reps = self.ex_classes + self.add_ex_reps
         else:
             # ex_class_reps = class_reps[self.ex_classes]
             ex_class_reps = self.ex_classes
 
-        if self.dropout > 0:
+        if self.config['dropout'] > 0:
             features = self.do(features)
             ex_features = self.do(ex_features)
 
@@ -203,15 +274,17 @@ class minerva(nn.Module):
         echo = torch.div(echo, b)
 
         # probs has dim (batch_size, num_phones)
-        probs = -torch.cdist(echo, class_reps)
+        neg_dists = -torch.cdist(echo, class_reps)
 
-        return probs, echo, nn.functional.normalize(s, dim = 1, p = 1)
+        loss = self.loss_fct(neg_dists, labels)
+
+        return loss, neg_dists
 
     
     def activation(self, s, p_factor = None):
 
         if p_factor is None:
-            p_factor = self.p_factor
+            p_factor = self.config['p_factor']
 
         return torch.mul(torch.pow(torch.abs(s), p_factor), torch.sign(s))
 
@@ -673,69 +746,69 @@ class BertMinervaMSEForMultiLabelClassification(BertPreTrainedModel):
 
 
     
-class STMinervaMSEForMultiLabelClassification(BertPreTrainedModel):
-    def __init__(self, config, minerva_config, exemplars):
-        super().__init__(config)
-        self.num_labels = config.num_labels
+# class STMinervaMSEForMultiLabelClassification(BertPreTrainedModel):
+#     def __init__(self, config, minerva_config, exemplars):
+#         super().__init__(config)
+#         self.num_labels = config.num_labels
 
-        self.sentence_transformer = AutoModel.from_pretrained(config._name_or_path)
-        # self.sentence_transformer = AutoModel.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
+#         self.sentence_transformer = AutoModel.from_pretrained(config._name_or_path)
+#         # self.sentence_transformer = AutoModel.from_pretrained("sentence-transformers/all-MiniLM-L6-v2")
 
 
-        self.dropout = nn.Dropout(config.hidden_dropout_prob)
-        self.exemplars = exemplars
-        self.minerva = minerva_mse(minerva_config, ex_classes = exemplars[3])
+#         self.dropout = nn.Dropout(config.hidden_dropout_prob)
+#         self.exemplars = exemplars
+#         self.minerva = minerva_mse(minerva_config, ex_classes = exemplars[3])
 
-        # self.loss_fct = nn.BCEWithLogitsLoss()
-        self.loss_fct = contrastive_loss(m = minerva_config.m)
+#         # self.loss_fct = nn.BCEWithLogitsLoss()
+#         self.loss_fct = contrastive_loss(m = minerva_config.m)
 
-    def forward(
-            self,
-            input_ids=None,
-            attention_mask=None,
-            token_type_ids=None,
-            position_ids=None,
-            head_mask=None,
-            inputs_embeds=None,
-            labels=None,
-    ):
-        outputs = self.sentence_transformer(
-            input_ids,
-            attention_mask=attention_mask,
-            token_type_ids=token_type_ids,
-            position_ids=position_ids,
-            head_mask=head_mask,
-            inputs_embeds=inputs_embeds,
-        )
-        # print(f"outputs:\n{outputs}\n")
-        # print(f"attention_mask:\n{attention_mask}\n")
-        pooled_output = self.mean_pooling(outputs, attention_mask)
+#     def forward(
+#             self,
+#             input_ids=None,
+#             attention_mask=None,
+#             token_type_ids=None,
+#             position_ids=None,
+#             head_mask=None,
+#             inputs_embeds=None,
+#             labels=None,
+#     ):
+#         outputs = self.sentence_transformer(
+#             input_ids,
+#             attention_mask=attention_mask,
+#             token_type_ids=token_type_ids,
+#             position_ids=position_ids,
+#             head_mask=head_mask,
+#             inputs_embeds=inputs_embeds,
+#         )
+#         # print(f"outputs:\n{outputs}\n")
+#         # print(f"attention_mask:\n{attention_mask}\n")
+#         pooled_output = self.mean_pooling(outputs, attention_mask)
 
-        exemplar_output = self.sentence_transformer(
-            input_ids = self.exemplars[0],
-            attention_mask = self.exemplars[1],
-            token_type_ids = self.exemplars[2]
-        )
-        pooled_exemplar_output = self.mean_pooling(exemplar_output, self.exemplars[1])
+#         exemplar_output = self.sentence_transformer(
+#             input_ids = self.exemplars[0],
+#             attention_mask = self.exemplars[1],
+#             token_type_ids = self.exemplars[2]
+#         )
+#         pooled_exemplar_output = self.mean_pooling(exemplar_output, self.exemplars[1])
 
-        # pooled_output = self.dropout(pooled_output)
-        distances = self.minerva(pooled_output, pooled_exemplar_output)
-        outputs = (-distances, ) + outputs[2:]  # add hidden states and attention if they are here
+#         # pooled_output = self.dropout(pooled_output)
+#         distances = self.minerva(pooled_output, pooled_exemplar_output)
+#         outputs = (-distances, ) + outputs[2:]  # add hidden states and attention if they are here
 
-        if labels is not None:
-            # print(f"\nechos size:\n{echos.size()}\n")
-            # print(f"\nechos size:\n{echos.size()}\n")
-            loss = self.loss_fct(distances, labels)
-            outputs = (loss,) + outputs
+#         if labels is not None:
+#             # print(f"\nechos size:\n{echos.size()}\n")
+#             # print(f"\nechos size:\n{echos.size()}\n")
+#             loss = self.loss_fct(distances, labels)
+#             outputs = (loss,) + outputs
 
-        return outputs  # (loss), logits, (hidden_states), (attentions)
+#         return outputs  # (loss), logits, (hidden_states), (attentions)
 
-    def mean_pooling(self, model_output, attention_mask):
-        token_embeddings = model_output[0] #First element of model_output contains all token embeddings
-        input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
-        sum_embeddings = torch.sum(token_embeddings * input_mask_expanded, 1)
-        sum_mask = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
-        return sum_embeddings / sum_mask
+#     def mean_pooling(self, model_output, attention_mask):
+#         token_embeddings = model_output[0] #First element of model_output contains all token embeddings
+#         input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
+#         sum_embeddings = torch.sum(token_embeddings * input_mask_expanded, 1)
+#         sum_mask = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
+#         return sum_embeddings / sum_mask
     
     
 
