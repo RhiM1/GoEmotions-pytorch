@@ -368,7 +368,8 @@ def main(cli_args):
                 "_fd" + str(args.feat_dim) + \
                 "_bs" + str(args.train_batch_size) + \
                 "_wd" + str(args.weight_decay) + \
-                "_lr" + str(args.learning_rate)
+                "_lr" + str(args.learning_rate) + \
+                "_do" + str(args.dropout)
             run = wandb.init(project=args.wandb_project, reinit = True, name = modelName)
         elif args.model_type == 'w2v_minerva':
             modelName = args.output_dir.split("-")[2] + \
@@ -377,12 +378,13 @@ def main(cli_args):
                 "_bs" + str(args.train_batch_size) + \
                 "_wd" + str(args.weight_decay) + \
                 "_lr" + str(args.learning_rate) + \
+                "_do" + str(args.dropout) + \
                 "_ex" + str(args.minerva_num_ex) + \
                 "_cd" + str(args.minerva_class_dim) + \
                 "_ug" + str(int(args.minerva_use_g)) + \
                 "_p" + str(args.minerva_p_factor) + \
                 "_tcr" + str(int(args.minerva_train_class_reps)) + \
-                "_tec" + str(int(args.minerve_train_ex_class)) + \
+                "_tec" + str(int(args.minerva_train_ex_class)) + \
                 "_tef" + str(int(args.minerva_train_ex_feats))
             run = wandb.init(project=args.wandb_project, reinit = True, name = modelName)
 
