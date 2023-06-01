@@ -25,7 +25,7 @@
   "no_cuda": false,
   "model_type": "w2v_ffnn",
   "model_name_or_path": "word2vec-google-news-300",
-  "seed": 42,
+  "seed": 44,
   "train_batch_size": 16,
   "eval_batch_size": 32,
   "logging_steps": 1000,

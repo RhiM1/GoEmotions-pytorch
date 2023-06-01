@@ -1,5 +1,5 @@
 {
-  "output_dir": "group-w2v_ffnn-023",
+  "output_dir": "group-w2v_minerva-021",
   "data_dir": "data/group",
   "wandb_project": "goemotions-group-w2v",
   "task": "goemotions",
@@ -23,7 +23,7 @@
   "max_steps": -1,
   "max_grad_norm": 1.0,
   "no_cuda": false,
-  "model_type": "w2v_ffnn",
+  "model_type": "w2v_minerva",
   "model_name_or_path": "word2vec-google-news-300",
   "seed": 42,
   "train_batch_size": 16,
@@ -32,6 +32,15 @@
   "save_steps": 1000,
   "learning_rate": 5e-4,
   "threshold": [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
-  "feat_dim": 1024,
-  "dropout": 0.8
+  "feat_dim": 32,
+  "dropout": 0,
+  "minerva_m": 0.5,
+  "minerva_class_dim": 4,
+  "minerva_use_g": true,
+  "minerva_p_factor": 1,
+  "minerva_train_class_reps": false,
+  "minerva_train_ex_class": true,
+  "minerva_train_ex_feats": false,
+  "minerva_num_ex": 16,
+  "class_init": [[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]
 }

@@ -191,10 +191,12 @@ def evaluate(args, model, eval_dataset, mode, global_step=None, threshold = None
                 # "token_type_ids": batch[2],
                 "labels": batch[1]
             }
+            print(f"features:\n{inputs['features']}\n\nlabels:\n{inputs['labels']}")
             tmp_eval_loss, logits  = model(**inputs)
 
             eval_loss += tmp_eval_loss.mean().item()
         nb_eval_steps += 1
+        print(f"logits:\n{logits}")
         if preds is None:
             preds = 1 / (1 + np.exp(-logits.detach().cpu().numpy()))  # Sigmoid
             out_label_ids = inputs["labels"].detach().cpu().numpy()
@@ -206,6 +208,8 @@ def evaluate(args, model, eval_dataset, mode, global_step=None, threshold = None
     results = {
         str(mode) + "_loss": eval_loss
     }
+    print(f"preds:\n{preds}")
+    print(f"eval_loss: {eval_loss}")
 
     preds_ = np.copy(preds)
     if threshold is None:
