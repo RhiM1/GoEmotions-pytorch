@@ -284,6 +284,7 @@ def main(cli_args):
     print(args)
 
     args.output_dir = os.path.join(args.ckpt_dir, args.output_dir)
+    args.device = "cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu"
 
     init_logger()
     set_seed(args)
@@ -300,79 +301,136 @@ def main(cli_args):
         minerva_dim_reduce = args.minerva_dim_reduce if args.minerva_dim_reduce else None
     )
 
-    minerva_config = MinervaConfig(
-        input_dim = config.hidden_size,
-        dim_reduce = args.minerva_dim_reduce,
-        class_dim = args.minerva_class_dim,
-        use_g = args.minerva_use_g,
-        dropout = args.minerva_dropout,
-        p_factor = args.minerva_p_factor,
-        train_class_reps = args.minerva_train_class_reps,
-        train_ex_class = args.minerva_train_ex_class,
-        train_ex_feat = args.minerva_train_ex_feats,
-        num_classes = len(label_list)
-    )
+    # minerva_config = MinervaConfig(
+    #     input_dim = config.hidden_size,
+    #     dim_reduce = args.minerva_dim_reduce,
+    #     class_dim = args.minerva_class_dim,
+    #     use_g = args.minerva_use_g,
+    #     dropout = args.minerva_dropout,
+    #     p_factor = args.minerva_p_factor,
+    #     train_class_reps = args.minerva_train_class_reps,
+    #     train_ex_class = args.minerva_train_ex_class,
+    #     train_ex_feat = args.minerva_train_ex_feats,
+    #     num_classes = len(label_list)
+    # )
 
     tokenizer = BertTokenizer.from_pretrained(
         args.tokenizer_name_or_path,
     )
     # Load dataset
     train_dataset = load_and_cache_examples(args, tokenizer, mode="train") if args.train_file else None
-
-    exIDX = torch.randperm(len(train_dataset))[0:args.num_ex]
-
-    exemplars = train_dataset[exIDX]
-
     dev_dataset = load_and_cache_examples(args, tokenizer, mode="dev") if args.dev_file else None
     test_dataset = load_and_cache_examples(args, tokenizer, mode="test") if args.test_file else None
 
+    # example_feats, example_classes = train_dataset[0]
+    # print(f"features size: {example_feats.size(0)}, num_classes: {example_classes.size(0)}")
+
+    if args.model_type == 'bert':
+        # config = {'input_dim': example_feats.size(0),
+        #           'feat_dim': args.feat_dim,
+        #           'num_labels': example_classes.size(0),
+        #           'dropout': args.dropout}
+    
+        model = BertForMultiLabelClassification.from_pretrained(
+            args.model_name_or_path,
+            config=config
+        )
+    elif args.model_type == 'bert_minerva':
+        minerva_config = {'input_dim': config.hidden_size,
+                  'feat_dim': args.feat_dim,
+                  'num_labels': len(label_list),
+                  'dropout': args.dropout,
+                  'use_g': args.minerva_use_g,
+                  'class_dim': args.minerva_class_dim,
+                  'p_factor': args.minerva_p_factor,
+                  'train_class_reps': args.minerva_train_class_reps,
+                  'train_ex_class': args.minerva_train_ex_class,
+                  'train_ex_feats': args.minerva_train_ex_feats
+                  }
+        
+        ex_IDX = torch.randperm(len(train_dataset))[0:args.minerva_num_ex]
+        exemplars = train_dataset[ex_IDX]
+        exemplars = [thing.to(args.device) for thing in exemplars]
+        
+        model = BertMinervaForMultiLabelClassification(
+            config = config,
+            minerva_config = minerva_config,
+            exemplars = exemplars,
+            ex_IDX = ex_IDX
+        )
+        
 
     # GPU or CPU
-    args.device = "cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu"
-    exemplars = [thing.to(args.device) for thing in exemplars]
-    model = BertMinervaForMultiLabelClassification.from_pretrained(
-        args.model_name_or_path,
-        config=config,
-        minerva_config = minerva_config,
-        exemplars = exemplars
-    )
+    # model = BertMinervaForMultiLabelClassification.from_pretrained(
+    #     args.model_name_or_path,
+    #     config=config,
+    #     minerva_config = minerva_config,
+    #     exemplars = exemplars
+    # )
 
     model.to(args.device)
 
     if dev_dataset is None:
         args.evaluate_test_during_training = True  # If there is no dev dataset, only use test dataset
-
+        
     if not cli_args.skip_wandb:
-        modelName = args.output_dir.split("-")[2] + \
-            "_" + args.model_type + \
-            "_ex" + str(args.num_ex) + \
-            "_wd" + str(args.weight_decay) + \
-            "_lr" + str(args.learning_rate) + \
-            "_p" + str(args.minerva_p_factor) + \
-            "_ug" + str(int(args.minerva_use_g)) + \
-            "_dr" + str(int(args.minerva_dim_reduce)) + \
-            "_mdo" + str(args.minerva_dropout) + \
-            "_tcr" + str(int(args.minerva_train_class_reps)) + \
-            "_tec" + str(int(args.minerva_train_ex_class)) + \
-            "_tef" + str(int(args.minerva_train_ex_feats))
-        run = wandb.init(project=args.wandb_project, reinit = True, name = modelName)
+        if args.model_type == 'bert':
+            modelName = args.output_dir.split("-")[2] + \
+                "_" + args.model_type + \
+                "_fd" + str(args.feat_dim) + \
+                "_bs" + str(args.train_batch_size) + \
+                "_wd" + str(args.weight_decay) + \
+                "_lr" + str(args.learning_rate) + \
+                "_do" + str(args.dropout)
+            run = wandb.init(project=args.wandb_project, reinit = True, name = modelName)
+        elif args.model_type == 'bert_minerva':
+            modelName = args.output_dir.split("-")[2] + \
+                "_" + args.model_type + \
+                "_fd" + str(args.feat_dim) + \
+                "_bs" + str(args.train_batch_size) + \
+                "_wd" + str(args.weight_decay) + \
+                "_lr" + str(args.learning_rate) + \
+                "_do" + str(args.dropout) + \
+                "_ex" + str(args.minerva_num_ex) + \
+                "_cd" + str(args.minerva_class_dim) + \
+                "_ug" + str(int(args.minerva_use_g)) + \
+                "_p" + str(args.minerva_p_factor) + \
+                "_tcr" + str(int(args.minerva_train_class_reps)) + \
+                "_tec" + str(int(args.minerva_train_ex_class)) + \
+                "_tef" + str(int(args.minerva_train_ex_feats))
+            run = wandb.init(project=args.wandb_project, reinit = True, name = modelName)
 
-        print(f'\nLogging with Wandb id: {wandb.run.id}\n')
+    # if not cli_args.skip_wandb:
+    #     modelName = args.output_dir.split("-")[2] + \
+    #         "_" + args.model_type + \
+    #         "_ex" + str(args.minerva_num_ex) + \
+    #         "_wd" + str(args.weight_decay) + \
+    #         "_lr" + str(args.learning_rate) + \
+    #         "_p" + str(args.minerva_p_factor) + \
+    #         "_ug" + str(int(args.minerva_use_g)) + \
+    #         "_dr" + str(int(args.feat_dim)) + \
+    #         "_mdo" + str(args.minerva_dropout) + \
+    #         "_tcr" + str(int(args.minerva_train_class_reps)) + \
+    #         "_tec" + str(int(args.minerva_train_ex_class)) + \
+    #         "_tef" + str(int(args.minerva_train_ex_feats))
+    #     run = wandb.init(project=args.wandb_project, reinit = True, name = modelName)
 
-        wandb_config={
-            "weight decay": args.weight_decay,
-            "p-factor": args.minerva_p_factor,
-            "num ex": args.num_ex,
-            "dataset": "GoEmotions",
-            "epochs": args.num_train_epochs,
-            "weight_decay": args.weight_decay,
-            "learning rate": args.learning_rate,
-            "use_g": args.minerva_use_g,
-            "minerva dropout": args.minerva_dropout,
-            "train_class_reps": args.minerva_train_class_reps,
-            "train_ex_class": args.minerva_train_ex_class,
-            "train_ex_feats": args.minerva_train_ex_feats
-        }
+    #     print(f'\nLogging with Wandb id: {wandb.run.id}\n')
+
+    #     wandb_config={
+    #         "weight decay": args.weight_decay,
+    #         "p-factor": args.minerva_p_factor,
+    #         "num ex": args.minerva_num_ex,
+    #         "dataset": "GoEmotions",
+    #         "epochs": args.num_train_epochs,
+    #         "weight_decay": args.weight_decay,
+    #         "learning rate": args.learning_rate,
+    #         "use_g": args.minerva_use_g,
+    #         "minerva dropout": args.minerva_dropout,
+    #         "train_class_reps": args.minerva_train_class_reps,
+    #         "train_ex_class": args.minerva_train_ex_class,
+    #         "train_ex_feats": args.minerva_train_ex_feats
+    #     }
 
     if args.do_train:
         global_step, tr_loss = train(args, model, tokenizer, train_dataset, dev_dataset, test_dataset)

@@ -1,5 +1,5 @@
 {
-  "output_dir": "group-w2v_minerva-029",
+  "output_dir": "group-w2v_minerva-034",
   "data_dir": "data/group",
   "wandb_project": "goemotions-group-w2v",
   "task": "goemotions",
@@ -35,9 +35,9 @@
   "feat_dim": 32,
   "dropout": 0,
   "minerva_m": 0.5,
-  "minerva_class_dim": 4,
+  "minerva_class_dim": null,
   "minerva_use_g": true,
-  "minerva_p_factor": 3,
+  "minerva_p_factor": 2,
   "minerva_train_class_reps": true,
   "minerva_train_ex_class": true,
   "minerva_train_ex_feats": false,
