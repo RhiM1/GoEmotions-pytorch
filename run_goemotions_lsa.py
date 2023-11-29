@@ -275,6 +275,7 @@ def evaluate(args, model, eval_dataset, mode, global_step=None, threshold = None
 
 
 def main(cli_args):
+
     # Read from config file and make args
     config_filename = "{}.json".format(cli_args.taxonomy)
     with open(os.path.join("config", config_filename)) as f:
@@ -282,37 +283,15 @@ def main(cli_args):
     logger.info("Training/evaluation parameters {}".format(args))
 
     args.output_dir = os.path.join(args.ckpt_dir, args.output_dir)
+    args.device = "cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu"
 
     init_logger()
     set_seed(args)
 
-    # processor = GoEmotionsProcessor(args)
-    # label_list = processor.get_labels()
-
-    # config = BertConfig.from_pretrained(
-    #     args.model_name_or_path,
-    #     num_labels=len(label_list),
-    #     finetuning_task=args.task,
-    #     id2label={str(i): label for i, label in enumerate(label_list)},
-    #     label2id={label: i for i, label in enumerate(label_list)}
-    # )
-    # tokenizer = BertTokenizer.from_pretrained(
-    #     args.tokenizer_name_or_path,
-    # )
-
-
     lsa_model = get_lsa_dict('data/LSA/TASA.rda')
-    # Word2Vec.keyedvectors.KeyedVectors.load_word2vec_format()
-    # w2v_model = Word2Vec.load(args.model_name_or_path)
-    # w2v_model.save("w2v.model")
-
     # GPU or CPU
-    args.device = "cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu"
 
     # Load dataset
-    # train_dataset = load_and_cache_examples(args, tokenizer, mode="train") if args.train_file else None
-    # dev_dataset = load_and_cache_examples(args, tokenizer, mode="dev") if args.dev_file else None
-    # test_dataset = load_and_cache_examples(args, tokenizer, mode="test") if args.test_file else None
     train_dataset = get_word2vec_dataset(args.data_dir, mode = 'train', model = lsa_model) if args.train_file else None
     dev_dataset = get_word2vec_dataset(args.data_dir, mode = 'dev', model = lsa_model) if args.train_file else None
     test_dataset = get_word2vec_dataset(args.data_dir, mode = 'test', model = lsa_model) if args.train_file else None
@@ -320,31 +299,30 @@ def main(cli_args):
     example_feats, example_classes = train_dataset[0]
     print(f"features size: {example_feats.size(0)}, num_classes: {example_classes.size(0)}")
 
-
-
-
-
     if args.model_type == 'lsa_ffnn':
-        config = {'input_dim': example_feats.size(0),
-                  'feat_dim': args.feat_dim,
-                  'num_labels': example_classes.size(0),
-                  'dropout': args.dropout}
+        config = {
+            'input_dim': example_feats.size(0),
+            'feat_dim': args.feat_dim,
+            'num_labels': example_classes.size(0),
+            'dropout': args.dropout
+        }
     
         model = ffnn(
             config = config
         )
     elif args.model_type == 'lsa_minerva':
-        config = {'input_dim': example_feats.size(0),
-                  'feat_dim': args.feat_dim,
-                  'num_labels': example_classes.size(0),
-                  'dropout': args.dropout,
-                  'use_g': args.minerva_use_g,
-                  'class_dim': args.minerva_class_dim,
-                  'p_factor': args.minerva_p_factor,
-                  'train_class_reps': args.minerva_train_class_reps,
-                  'train_ex_class': args.minerva_train_ex_class,
-                  'train_ex_feats': args.minerva_train_ex_feats
-                  }
+        config = {
+            'input_dim': example_feats.size(0),
+            'feat_dim': args.feat_dim,
+            'num_labels': example_classes.size(0),
+            'dropout': args.dropout,
+            'use_g': args.minerva_use_g,
+            'class_dim': args.minerva_class_dim,
+            'p_factor': args.minerva_p_factor,
+            'train_class_reps': args.minerva_train_class_reps,
+            'train_ex_class': args.minerva_train_ex_class,
+            'train_ex_feats': args.minerva_train_ex_feats
+        }
         
         exIDX = torch.randperm(len(train_dataset))[0:args.minerva_num_ex]
         exemplars = train_dataset[exIDX]
@@ -389,9 +367,6 @@ def main(cli_args):
                 "_tef" + str(int(args.minerva_train_ex_feats))
             run = wandb.init(project=args.wandb_project, reinit = True, name = modelName)
 
-
-
-
         wandb_config={
             "dataset": "GoEmotions",
             "epochs": args.num_train_epochs,
@@ -400,7 +375,6 @@ def main(cli_args):
         }
 
         print(f'\nLogging with Wandb id: {wandb.run.id}\n')
-
 
     if args.do_train:
         global_step, tr_loss = train(args, model, train_dataset, dev_dataset, test_dataset)

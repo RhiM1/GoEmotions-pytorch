@@ -47,6 +47,7 @@ def get_sentence_transformer_dataset(
     return dataset
 
 
+
 def get_word2vec_dataset(
         dataFolder,
         mode,
@@ -74,14 +75,10 @@ def get_word2vec_dataset(
     sentence_embeddings = torch.zeros(num_texts, feat_dim, dtype = torch.float)
     emotions = torch.zeros(num_texts, num_classes, dtype = torch.float)
 
-    
-
     for rowID, row in enumerate(data):
         if row != "":
-            # print(row)
             text, sen_emotions, _ = row.split("\t")
             text = (re.sub(r"[^\w\s]", '', text))
-            # print(f"text: {text}\nsen_emotions {sen_emotions}")
             texts.append(text.split(" "))
             text_embedding = [torch.tensor(model[word], dtype = torch.float) for word in text.split(" ") if word in model]
             if len(text_embedding) > 1:
@@ -90,18 +87,11 @@ def get_word2vec_dataset(
                 text_embedding = torch.zeros(1, feat_dim, dtype = torch.float)
             word_embeddings.append(text_embedding)
             sentence_embeddings[rowID] = text_embedding.mean(dim = 0)
-            words = [word for word in text.split(" ") if word in model]
-            # print(f"words: {words}")
-            # print(text_embedding)
-            # print(sentence_embeddings[rowID])
-            # print(text_embedding.size())
-            # print(sentence_embeddings[rowID].size())
+            # words = [word for word in text.split(" ") if word in model]
             texts[rowID]
             for emotion in sen_emotions.split(","):
                 emotions[rowID, int(emotion)] = 1
     
-    # print(texts[0:10])
-    # print(word_embeddings[0:10])
     print(f"Number of texts: {num_texts}, sentence embeddings size: {sentence_embeddings.size()}, emotions size: {emotions.size()}")
 
     dataset = TensorDataset(sentence_embeddings, emotions)

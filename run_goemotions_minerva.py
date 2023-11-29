@@ -18,7 +18,7 @@ from transformers import (
     get_linear_schedule_with_warmup
 )
 
-from model import BertForMultiLabelClassification, BertMinervaForMultiLabelClassification, MinervaConfig
+from model import BertForMultiLabelClassification, BertMinervaForMultiLabelClassification
 from utils import (
     init_logger,
     set_seed,
@@ -116,7 +116,7 @@ def train(args,
 
                 if args.logging_steps > 0 and global_step % args.logging_steps == 0:
                     
-                    if not cli_args.skip_wandb:
+                    if not args.skip_wandb:
                         wandb.log({
                             'train_loss': tr_loss / global_step,
                             'global_step': global_step
@@ -246,7 +246,7 @@ def evaluate(args, model, eval_dataset, mode, global_step=None, threshold = None
     # result = compute_metrics(out_label_ids, preds)
     # results.update(result)
         
-    if not cli_args.skip_wandb:
+    if not args.skip_wandb:
         wandb.log(results)
 
 
@@ -274,9 +274,9 @@ def evaluate(args, model, eval_dataset, mode, global_step=None, threshold = None
     return results
 
 
-def main(cli_args):
+def main(args):
     # Read from config file and make args
-    config_filename = "{}.json".format(cli_args.taxonomy)
+    config_filename = "{}.json".format(args.config)
     with open(os.path.join("config", config_filename)) as f:
         args = AttrDict(json.load(f))
     logger.info("Training/evaluation parameters {}".format(args))
@@ -298,7 +298,7 @@ def main(cli_args):
         finetuning_task=args.task,
         id2label={str(i): label for i, label in enumerate(label_list)},
         label2id={label: i for i, label in enumerate(label_list)},
-        minerva_dim_reduce = args.minerva_dim_reduce if args.minerva_dim_reduce else None
+        # minerva_dim_reduce = args.minerva_dim_reduce if args.minerva_dim_reduce is not None else None
     )
 
     # minerva_config = MinervaConfig(
@@ -373,7 +373,7 @@ def main(cli_args):
     if dev_dataset is None:
         args.evaluate_test_during_training = True  # If there is no dev dataset, only use test dataset
         
-    if not cli_args.skip_wandb:
+    if not args.skip_wandb:
         if args.model_type == 'bert':
             modelName = args.output_dir.split("-")[2] + \
                 "_" + args.model_type + \
@@ -400,7 +400,7 @@ def main(cli_args):
                 "_tef" + str(int(args.minerva_train_ex_feats))
             run = wandb.init(project=args.wandb_project, reinit = True, name = modelName)
 
-    # if not cli_args.skip_wandb:
+    # if not args.skip_wandb:
     #     modelName = args.output_dir.split("-")[2] + \
     #         "_" + args.model_type + \
     #         "_ex" + str(args.minerva_num_ex) + \
@@ -461,16 +461,16 @@ def main(cli_args):
                 f_w.write("{} = {}\n".format(key, str(results[key])))
 
     
-    if not cli_args.skip_wandb:
+    if not args.skip_wandb:
         run.finish()
 
 
 if __name__ == '__main__':
-    cli_parser = argparse.ArgumentParser()
+    arg_parser = argparse.ArgumentParser()
 
-    cli_parser.add_argument("--taxonomy", type=str, required=True, help="Taxonomy (original, ekman, group)")
-    cli_parser.add_argument("--skip_wandb", action='store_true', help="Don't use WandB logging")
+    arg_parser.add_argument("--config", type=str, required=True, help="name of the configuration file")
+    arg_parser.add_argument("--skip_wandb", action='store_true', help="Don't use WandB logging")
 
-    cli_args = cli_parser.parse_args()
+    args = arg_parser.parse_args()
 
-    main(cli_args)
+    main(args)
