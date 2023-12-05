@@ -166,7 +166,7 @@ class base_model(nn.Module):
 
     def save_pretrained(self, output_dir):    
         torch.save(self.args, output_dir + "/config.json")
-        torch.save(self.state_dict, output_dir + "/model.mod")
+        torch.save(self.state_dict(), output_dir + "/model.mod")
              
 
     def load_pretrained(self, load_dir):
@@ -198,7 +198,7 @@ class ffnn_wrapper(base_model):
             input_dim = args.input_dim,
             embed_dim = args.class_dim,
             output_dim = args.num_labels,
-            dropout = args.dropout
+            dropout = args.do_class
         )
 
 
@@ -237,12 +237,17 @@ class minerva(base_model):
                 bias = False
             )
 
-        if args.dropout is not None:
-            self.dropout = nn.Dropout(p = args.dropout)
+        if args.do_feat is not None:
+            self.do_feat = nn.Dropout(p = args.do_feat)
         else:
-            self.dropout = None
+            self.do_feat = None
 
         self.minerva = minerva2(p_factor = args.p_factor)
+
+        if args.do_class is not None:
+            self.do_class = nn.Dropout(p = args.do_class)
+        else:
+            self.do_class = None
 
         self.set_exemplars(ex_features, ex_classes, ex_IDX)
         self.initialise_exemplars()
@@ -318,9 +323,9 @@ class minerva(base_model):
             ex_features = self.g(ex_features)
         # print(f"features.size: {features.size()}, ex_features.size: {ex_features.size()}")
 
-        if self.dropout is not None:
-            features = self.dropout(features)
-            ex_features = self.dropout(ex_features)
+        if self.do_feat is not None:
+            features = self.do_feat(features)
+            ex_features = self.do_feat(ex_features)
 
         ex_class_reps = torch.matmul(
             torch.nn.functional.normalize(ex_classes, dim = -1),
@@ -328,12 +333,16 @@ class minerva(base_model):
         )
         if self.args.train_ex_class:
             ex_class_reps += self.add_ex_class_reps
+            
+        if self.do_class is not None:
+            ex_class_reps = self.do_class(ex_class_reps)
 
         # print(f"class rep dim: {class_reps.size()}")    
         # print(f"ex_classes dim: {self.ex_classes.size()}")   
         # print(f"features dim: {features.size()}")
         # print(f"ex_features dim: {ex_features.size()}")
         # print(f"ex_class_reps dim: {ex_class_reps.size()}")
+
 
         echo, _ = self.minerva(features, ex_features, ex_class_reps, p_factor)
 
@@ -387,7 +396,7 @@ class BertForMultiLabelClassification(BertPreTrainedModel):
             input_dim = config.hidden_size,
             embed_dim = args.class_dim,
             output_dim = config.num_labels,
-            dropout = args.dropout
+            dropout = args.do_class
         )
 
         self.loss_fct = nn.BCEWithLogitsLoss()
