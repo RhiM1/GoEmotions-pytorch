@@ -69,7 +69,7 @@ def get_goem_dataset(
         data = f.read().split("\n")
     
     num_texts = len(data)
-    if args.feats_type == 'sen_trans':
+    if args.feats_type == 'sen_trans' or args.feats_type == 'glove':
         feat_dim = len(model.encode('hello'))
     else:
         feat_dim = len(model['hello'])

@@ -16,7 +16,7 @@ import gensim.downloader as api
 #     get_linear_schedule_with_warmup, get_constant_schedule_with_warmup
 from sentence_transformers import SentenceTransformer, util
 
-from model import ffnn_wrapper, minerva, \
+from model import ffnn_wrapper, minerva, minerva_detEx, \
     BertForMultiLabelClassification, BertMinervaForMultiLabelClassification
 
 from utils import init_logger, set_seed, compute_metrics
@@ -39,7 +39,7 @@ def train(
 
     train_sampler = RandomSampler(train_dataset)
     train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=args.train_batch_size)
-    if args.model_type == 'minerva' and not args.fix_ex:
+    if args.exemplar and not args.fix_ex:
         total_ex = len(train_dataset)
         ex_so_far = 0
         ex_dataloader = iter(DataLoader(train_dataset, sampler=RandomSampler(train_dataset), batch_size=args.num_ex))
@@ -54,20 +54,20 @@ def train(
     for name, param in model.named_parameters():
         if name == "class_reps":
             optParams.append(
-                {'params': param, 'weight_decay': args.wd_ex}
+                {'params': param, 'weight_decay': args.wd_ex, 'lr': args.lr_ex}
             )
         elif name == "add_ex_reps" or name == "add_ex_feats":
             optParams.append(
-                {'params': param, 'weight_decay': args.weight_decay}
+                {'params': param, 'weight_decay': args.weight_decay, 'lr': args.lr_ex}
             )
         else:
             optParams.append(
-                {'params': param, 'weight_decay': args.weight_decay}
+                {'params': param, 'weight_decay': args.weight_decay, 'lr': args.learning_rate}
             )
 
     
     # optimizer = torch.optim.Adam(optParams, lr=args.learning_rate, eps=args.adam_epsilon)
-    optimizer = torch.optim.AdamW(optParams, lr=args.learning_rate, eps=args.adam_epsilon)
+    optimizer = torch.optim.AdamW(optParams, eps=args.adam_epsilon)
 
     if os.path.isfile(os.path.join(args.model_name_or_path, "optimizer.pt")) and os.path.isfile(
         os.path.join(args.model_name_or_path, "scheduler.pt")
@@ -87,9 +87,10 @@ def train(
     # global_step = 0
     tr_loss = 0
     best_weighted_f1_dev = 0
+    best_macro_f1_dev = 0
     epoch = 1
     best_epoch = 0
-
+    best_results = {}
     model.zero_grad()
     train_iterator = trange(int(args.num_train_epochs), desc="Epoch")
     for _ in train_iterator:
@@ -105,7 +106,7 @@ def train(
                     "token_type_ids": batch[2],
                     "labels": batch[3]
                 }
-                if args.model_type == 'minerva' and not args.fix_ex:
+                if args.exemplar and not args.fix_ex:
                     ex_so_far += args.num_ex
                     if ex_so_far > total_ex:
                         ex_dataloader = iter(DataLoader(train_dataset, sampler=RandomSampler(train_dataset), batch_size=args.num_ex))
@@ -118,7 +119,7 @@ def train(
                     "features": batch[0],
                     "labels": batch[1]
                 }
-                if args.model_type == 'minerva' and not args.fix_ex:
+                if args.exemplar and not args.fix_ex:
                     ex_so_far += args.num_ex
                     if ex_so_far > total_ex:
                         ex_dataloader = iter(DataLoader(train_dataset, sampler=RandomSampler(train_dataset), batch_size=args.num_ex))
@@ -159,14 +160,21 @@ def train(
 
             best_weighted_f1_dev = results['weighted_f1_dev']
             best_epoch = epoch
+            best_results['best_weighted_f1_dev'] = results['weighted_f1_dev']
+            best_results['best_weighted_precision_dev'] = results['weighted_precision_dev']
+            best_results['best_weighted_recall_dev'] = results['weighted_recall_dev']
+            best_results['best_weighted_f1_test'] = results['weighted_f1_test']
+            best_results['best_weighted_precision_test'] = results['weighted_precision_test']
+            best_results['best_weighted_recall_test'] = results['weighted_recall_test']
+            best_results['best_weighted_f1_epoch'] = epoch
 
             output_dir = os.path.join(args.output_dir, "checkpoint")
             if not os.path.exists(output_dir):
                 os.makedirs(output_dir)
-            model_to_save = (
-                model.module if hasattr(model, "module") else model
-            )
-            model_to_save.save_pretrained(output_dir)
+            # model_to_save = (
+            #     model.module if hasattr(model, "module") else model
+            # )
+            model.save_pretrained(output_dir)
             if tokenizer is not None:
                 tokenizer.save_pretrained(output_dir)
 
@@ -177,7 +185,23 @@ def train(
                 torch.save(optimizer.state_dict(), os.path.join(output_dir, "optimizer.pt"))
                 logger.info("Saving optimizer and scheduler states to {}".format(output_dir))
 
+        if results['macro_f1_dev'] > best_macro_f1_dev:
+
+            best_macro_f1_dev = results['macro_f1_dev']
+            # best_weighted_f1_dev = results['weighted_f1_dev']
+            best_results['best_macro_f1_dev'] = results['macro_f1_dev']
+            best_results['best_macro_precision_dev'] = results['macro_precision_dev']
+            best_results['best_macro_recall_dev'] = results['macro_recall_dev']
+            best_results['best_macro_f1_test'] = results['macro_f1_test']
+            best_results['best_macro_precision_test'] = results['macro_precision_test']
+            best_results['best_macro_recall_test'] = results['macro_recall_test']
+            best_results['best_macro_f1_epoch'] = epoch
+
+
         epoch += 1
+
+    if not args.skip_wandb:
+        wandb.log(best_results)
 
     return best_epoch
 
@@ -186,7 +210,7 @@ def evaluate(args, model, eval_dataset, mode, ex_dataset = None, epoch=None, thr
     results = {}
     eval_sampler = SequentialSampler(eval_dataset)
     eval_dataloader = DataLoader(eval_dataset, sampler=eval_sampler, batch_size=args.eval_batch_size)
-    if args.model_type == 'minerva' and not args.fix_ex:
+    if args.exemplar and not args.fix_ex:
         total_ex = len(ex_dataset)
         ex_so_far = 0
         ex_dataloader = iter(DataLoader(ex_dataset, sampler=RandomSampler(ex_dataset), batch_size=args.num_ex))
@@ -215,7 +239,7 @@ def evaluate(args, model, eval_dataset, mode, ex_dataset = None, epoch=None, thr
                     "token_type_ids": batch[2],
                     "labels": batch[3]
                 }
-                if args.model_type == 'minerva' and not args.fix_ex:
+                if args.exemplar and not args.fix_ex:
                     ex_so_far += args.num_ex
                     if ex_so_far > total_ex:
                         ex_dataloader = iter(DataLoader(ex_dataset, sampler=RandomSampler(ex_dataset), batch_size=args.num_ex))
@@ -228,7 +252,7 @@ def evaluate(args, model, eval_dataset, mode, ex_dataset = None, epoch=None, thr
                     "features": batch[0],
                     "labels": batch[1]
                 }
-                if args.model_type == 'minerva' and not args.fix_ex:
+                if args.exemplar and not args.fix_ex:
                     ex_so_far += args.num_ex
                     if ex_so_far > total_ex:
                         ex_dataloader = iter(DataLoader(ex_dataset, sampler=RandomSampler(ex_dataset), batch_size=args.num_ex))
@@ -329,11 +353,18 @@ def main(args):
         feats_model = api.load(args.model_name_or_path)
     elif args.feats_type == "sen_trans":
         feats_model = SentenceTransformer(args.model_name_or_path)
+    elif args.feats_type == "glove":
+        feats_model = SentenceTransformer('average_word_embeddings_glove.6B.300d')
 
     # Load dataset
     train_dataset = get_goem_dataset(args, mode = 'train', model = feats_model) if args.train_file else None
     dev_dataset = get_goem_dataset(args, mode = 'dev', model = feats_model) if args.dev_file else None
     test_dataset = get_goem_dataset(args, mode = 'test', model = feats_model) if args.test_file else None
+
+    # print(train_dataset.tensors[1].size())
+    # print(train_dataset.tensors[1].sum(dim = 0))
+
+    # quit()
 
     example_feats, example_classes = train_dataset[0]
     print(f"features size: {example_feats.size(0)}, num_classes: {example_classes.size(0)}")
@@ -342,7 +373,7 @@ def main(args):
 
     if args.model_type == 'ffnn':
         model = ffnn_wrapper(args)
-    elif args.model_type == 'minerva':
+    elif args.exemplar:
         if args.fix_ex:
             ex_IDX = torch.randperm(len(train_dataset))[0:args.num_ex]
             exemplars = train_dataset[ex_IDX]
@@ -352,12 +383,20 @@ def main(args):
             ex_IDX = None
             ex_features = None
             ex_classes = None
-        model = minerva(
-            args,
-            ex_classes = ex_classes,
-            ex_features = ex_features,
-            ex_IDX = ex_IDX
-        )
+        if args.model_type == 'minerva':
+            model = minerva(
+                args,
+                ex_classes = ex_classes,
+                ex_features = ex_features,
+                ex_IDX = ex_IDX
+            )
+        elif args.model_type == 'minerva_detEx':
+            model = minerva_detEx(
+                args,
+                ex_classes = ex_classes,
+                ex_features = ex_features,
+                ex_IDX = ex_IDX
+            )
 
     model.to(args.device)
 
@@ -377,15 +416,18 @@ def main(args):
                 f"{args.model_type}",
                 f"bs{args.train_batch_size * args.gradient_accumulation_steps}", 
                 f"lr{args.learning_rate}", 
+                f"lre{args.lr_ex}",
                 f"wd{args.weight_decay}",
                 f"fdo{args.do_feat}",
                 f"cdo{args.do_class}",
                 f"fd{args.feat_dim}",
                 f"cd{args.class_dim}",
-                f"s{args.seed}"
+                f"bn{int(args.use_batch_norm)}",
+                f"s{args.seed}",
+                f"{args.model_name_or_path}"
             ]
         )
-        if args.model_type == 'minerva':
+        if args.exemplar:
             run.tags = run.tags + (
                 f"g{int(args.use_g)}",
                 f"ex{args.num_ex}",
@@ -401,7 +443,7 @@ def main(args):
     if not args.skip_wandb:
         wandb.log(init_dev_results)
 
-    if args.do_train:
+    if not args.skip_train:
         best_epoch = train(args, model, train_dataset, tokenizer, dev_dataset, test_dataset)
         # logger.info(" global_step = {}, average loss = {}".format(global_step, tr_loss))
 
@@ -421,8 +463,12 @@ def main(args):
 
         # global_step = checkpoint.split("-")[-1]
         # model = BertMinervaForMultiLabelClassification.from_pretrained(checkpoint)
-        model.load_pretrained(args.output_dir + "/checkpoint")
-        model.to(args.device)
+        if args.skip_train:
+            best_epoch = 0
+        else:
+            model.load_pretrained(args.output_dir + "/checkpoint")
+            model.to(args.device)
+
         result = evaluate(args, model, test_dataset, mode="test", epoch=best_epoch)
         result = dict((k + "_{}".format(best_epoch), v) for k, v in result.items())
         results.update(result)
@@ -467,13 +513,13 @@ if __name__ == '__main__':
         "--do_lower_case", help="", default=False, action='store_true'
     )
     arg_parser.add_argument(
-        "--do_train", help="", default=True, action='store_true'
+        "--skip_train", help="", default=False, action='store_true'
     )
     arg_parser.add_argument(
         "--do_eval", help="", default=True, action='store_true'
     )
     arg_parser.add_argument(
-        "--seed", help = "only used for BERT", default = 42
+        "--seed", help = "only used for BERT", default = 42, type = int
     )
     arg_parser.add_argument(
         "--save_steps", help = "only used for BERT", default = 1000, type = int
@@ -484,15 +530,15 @@ if __name__ == '__main__':
 
     # Feats args
     arg_parser.add_argument(
-        "--feats_type", help = "feat extraction model: lsa, word2vec, sen_trans", default = "sen_trans"
+        "--feats_type", help = "feat extraction model: lsa, word2vec, sen_trans, glove", default = "sen_trans"
     )
     arg_parser.add_argument(
-        "--model_name_or_path", help = "", default = ""
+        "--model_name_or_path", help = "", default = " "
     )
 
     # Model args
     arg_parser.add_argument(
-        "--model_type", help = "ffnn or minerva", default = None
+        "--model_type", help = "ffnn, minerva, minerva_detEx", default = None
     )
     arg_parser.add_argument(
         "--feat_dim", help = "model feature embeddings dimension, where applicable", default = None, type = int
@@ -502,6 +548,12 @@ if __name__ == '__main__':
     )
     arg_parser.add_argument(
         "--use_g", help="", default=False, action='store_true'
+    )
+    arg_parser.add_argument(
+        "--use_ffnn", help="", default=False, action='store_true'
+    )
+    arg_parser.add_argument(
+        "--use_batch_norm", help="use batch normalization", default=False, action='store_true'
     )
     arg_parser.add_argument(
         "--p_factor", help = "minerva p factor", default = 1, type = int
@@ -539,6 +591,9 @@ if __name__ == '__main__':
         "--wd_ex", help = "weight decay for the exemplar represenations, minerva only", default = 0, type = float
     )
     arg_parser.add_argument(
+        "--wd_cr", help = "weight decay for the exemplar represenations, minerva only", default = 0, type = float
+    )
+    arg_parser.add_argument(
         "--gradient_accumulation_steps", help = "", default = 1, type = int
     )
     arg_parser.add_argument(
@@ -560,6 +615,12 @@ if __name__ == '__main__':
         "--learning_rate", help = "", default = 1e-5, type = float
     )
     arg_parser.add_argument(
+        "--lr_ex", help = "", default = None, type = float
+    )
+    arg_parser.add_argument(
+        "--lr_cr", help = "", default = None, type = float
+    )
+    arg_parser.add_argument(
         "--do_feat", help = "", default = 0, type = float
     )
     arg_parser.add_argument(
@@ -569,24 +630,36 @@ if __name__ == '__main__':
         "--no_cuda", help="", default=False, action='store_true'
     )
 
+
     args = arg_parser.parse_args()
+
+
+    if args.model_type == 'minerva' or args.model_type == 'minerva_detEx':
+        args.exemplar = True
+    else:
+        args.exemplar = False
 
     args.data_dir = DATAROOT
     args.train_file = "train.tsv"
     args.dev_file = "dev.tsv"
     args.test_file = "test.tsv"
     args.label_file = "labels.txt"
-    args.threshold = [i/10 for i in range(-5, 6, 1)]
-    if args.feats_type == 'sen_trans':
-        args.model_name_or_path = "all-MiniLM-L6-v2"
+    args.threshold = [i/40 for i in range(-20, 21, 1)]
+    if args.feats_type == 'sen_trans' and args.model_name_or_path == " ":
+        args.model_name_or_path = 'paraphrase-mpnet-base-v2'
+        # args.model_name_or_path = "all-MiniLM-L6-v2"
+        # args.model_name_or_path = "all-MiniLM-L12-v2"
+        # args.model_name_or_path = "all-mpnet-base-v2"
     elif args.feats_type == 'word2vec':
         args.model_name_or_path = "word2vec-google-news-300"
+    if args.lr_ex == None:
+        args.lr_ex = args.learning_rate
 
     # maybe delete...
-    args.tokenizer_name_or_path = "monologg/bert-base-cased-goemotions-group"
+    # args.tokenizer_name_or_path = "monologg/bert-base-cased-goemotions-group"
     args.task = "goemotions"
 
-    args.output_dir = f"{args.ckpt_dir}/{args.feats_type}_{args.model_type}_{args.exp_id}_{args.run_id}"
+    args.output_dir = f"{args.ckpt_dir}/{args.feats_type}_{args.model_type}_{args.exp_id}_{args.run_id}_{args.seed}"
     args.device = "cuda" if torch.cuda.is_available() and not args.no_cuda else "cpu"
 
     main(args)
