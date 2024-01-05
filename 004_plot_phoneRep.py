@@ -100,7 +100,7 @@ if __name__ == "__main__":
         "--model", help="phone classification model: ffnn, minerva2, minerva3", default="minerva"
     )
     parser.add_argument(
-        "--trained_model_folder", help="trained model folder name", default = "sen_trans_minerva_detEx_003_007e"
+        "--trained_model_folder", help="trained model folder name", default = "sen_trans_minerva_detEx_007_001_42"
     )
 
     args = parser.parse_args()

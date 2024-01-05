@@ -121,11 +121,15 @@ class minerva2(nn.Module):
 
     def __init__(
         self, 
-        p_factor = 1
+        p_factor = 1,
+        use_sm = False
     ):
         super().__init__()
 
         self.p_factor = p_factor
+        self.use_sm = use_sm
+        if use_sm:
+            self.sm = nn.Softmax(dim = 1)
 
 
     def forward(self, features, ex_features, ex_class_reps, p_factor = None):
@@ -143,7 +147,10 @@ class minerva2(nn.Module):
         )
 
         # a has dim (batch_size, ex_batch_size)
-        a = self.activation(s, p_factor)
+        if self.use_sm:
+            a = self.sm(p_factor * s)
+        else:
+            a = self.activation(s, p_factor)
 
         intensity = a.sum(dim = 1)
 
@@ -179,15 +186,17 @@ class base_model(nn.Module):
         else:
             self.args = args
 
-    def save_pretrained(self, output_dir):    
-        torch.save(self.args, output_dir + "/config.json")
-        torch.save(self.state_dict(), output_dir + "/model.mod")
+    def save_pretrained(self, output_dir, epoch = None):    
+        ep = f"{epoch}_" if epoch is not None else ""
+        torch.save(self.args, f"{output_dir}/{ep}config.json")
+        torch.save(self.state_dict(), f"{output_dir}/{ep}model.mod")
              
 
-    def load_pretrained(self, load_dir):
+    def load_pretrained(self, load_dir, epoch = None):
         # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.args = torch.load(load_dir + "/config.json")
-        state_dict = torch.load(load_dir + "/model.mod")
+        ep = f"{epoch}_" if epoch is not None else ""
+        self.args = torch.load(f"{load_dir}/{ep}config.json")
+        state_dict = torch.load(f"{load_dir}/{ep}model.mod")
         self.__init__(self.args)
         self.load_state_dict(state_dict)
         print(state_dict)
@@ -261,7 +270,7 @@ class minerva(base_model):
         else:
             self.do_feat = None
 
-        self.minerva = minerva2(p_factor = args.p_factor)
+        self.minerva = minerva2(p_factor = args.p_factor, use_sm = args.use_sm)
 
         if args.do_class is not None:
             self.do_class = nn.Dropout(p = args.do_class)
@@ -384,17 +393,17 @@ class minerva(base_model):
 
         return torch.mul(torch.pow(torch.abs(s), p_factor), torch.sign(s))
     
-    def save_pretrained(self, output_dir):    
+    def save_pretrained(self, output_dir, epoch):    
 
-        super().save_pretrained(output_dir)
+        super().save_pretrained(output_dir, epoch)
         
         if self.ex_IDX is not None:
             torch.save(self.ex_IDX, output_dir + "/ex_IDX.pt")
 
 
-    def load_pretrained(self, load_dir):
+    def load_pretrained(self, load_dir, epoch = None):
 
-        super().load_pretrained(load_dir)
+        super().load_pretrained(load_dir, epoch)
 
         if os.path.exists(load_dir + "/ex_IDX.pt"):
             self.ex_IDX = torch.load(load_dir + "/ex_IDX.pt")
@@ -419,6 +428,7 @@ class minerva_detEx(base_model):
             self.load_pretrained(load_dir)
         else:
             super().__init__(args = args, load_dir = load_dir)
+
             self.loss_fct = nn.BCEWithLogitsLoss()
 
             if args.use_g:
@@ -446,15 +456,12 @@ class minerva_detEx(base_model):
                         self.g = nn.Sequential(
                             nn.Linear(
                                 in_features = self.args.input_dim,
-                                out_features = feat_dim,
-                                bias = False
+                                out_features = feat_dim
                             ),
                             nn.Dropout(p = args.do_feat)
                         )
 
-                feat_dim = args.feat_dim if args.feat_dim is not None else args.input_dim
-
-            self.minerva = minerva2(p_factor = args.p_factor)
+            self.minerva = minerva2(p_factor = args.p_factor, use_sm = args.use_sm)
 
             if args.do_class is not None:
                 self.do_class = nn.Dropout(p = args.do_class)
@@ -485,14 +492,14 @@ class minerva_detEx(base_model):
             class_reps = torch.arange(self.args.num_labels)
             class_reps = nn.functional.one_hot(class_reps).type(torch.float)
         else:
-            class_reps = torch.rand(self.args.num_labels, self.args.class_dim, dtype = torch.float) * 2 - 1
+            class_reps = torch.rand(self.args.num_labels, self.args.class_dim, dtype = torch.float)
         self.class_reps = torch.nn.Parameter(class_reps, requires_grad = self.args.train_class_reps)
 
         if self.args.train_ex_class:
             # ex_class_reps = class_reps[self.ex_classes]
             ex_class_reps = torch.matmul(
-                # torch.nn.functional.normalize(self.ex_classes, dim = -1),
-                self.ex_classes,
+                torch.nn.functional.normalize(self.ex_classes, dim = -1, p = 1),
+                # self.ex_classes,
                 self.class_reps
             )
             self.ex_class_reps = torch.nn.Parameter(ex_class_reps)
@@ -566,19 +573,19 @@ class minerva_detEx(base_model):
 
         return torch.mul(torch.pow(torch.abs(s), p_factor), torch.sign(s))
     
-    def save_pretrained(self, output_dir):    
+    def save_pretrained(self, output_dir, epoch = None):    
 
-        super().save_pretrained(output_dir)
+        super().save_pretrained(output_dir, epoch)
         
         if self.ex_IDX is not None:
             torch.save(self.ex_IDX, output_dir + "/ex_IDX.pt")
 
 
-    def load_pretrained(self, load_dir):
+    def load_pretrained(self, load_dir, epoch = None):
 
-        args = torch.load(load_dir + "/config.json")
-        state_dict = torch.load(load_dir + "/model.mod")
-        # print(state_dict)
+        ep = f"{epoch}_" if epoch is not None else ""
+        args = torch.load(f"{load_dir}/{ep}config.json")
+        state_dict = torch.load(f"{load_dir}/{ep}model.mod")
 
         ex_classes = state_dict['ex_classes'].to('cpu') if 'ex_classes' in state_dict else None
         # ex_class_reps = state_dict['ex_class_reps'] if 'ex_class_reps' in state_dict else None
