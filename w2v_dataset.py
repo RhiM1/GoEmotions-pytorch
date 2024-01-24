@@ -120,6 +120,32 @@ def get_goem_dataset(
     return dataset
 
 
+def get_stratified_ex_idx(dataset, args):
+
+    all_feats = dataset[torch.arange(len(dataset))][0]
+    all_emotions = dataset[torch.arange(len(dataset))][1]
+
+    # print(all_feats.size(), all_emotions.size())
+    # print(all_emotions.sum(dim = 0))
+
+    mask = 2**torch.arange(args.num_classes)
+    # print(mask)
+    emotion_ids = all_emotions.to(torch.float) @ mask.to(torch.float)
+    # for i in range(10):
+    #     print(all_emotions[i], emotion_ids[i])
+    
+    ex_idx = []
+
+    for emotion_id in mask:
+        idx = torch.arange(len(all_emotions))[emotion_ids == emotion_id]
+        ex_idx.append(idx[torch.randperm(len(idx))[0:args.num_ex // args.num_classes]])
+    ex_idx = torch.cat(ex_idx)
+    # print(ex_idx)
+    # print(ex_idx.size())
+    # print(all_emotions[ex_idx])
+
+    return ex_idx
+
 
 def get_lsa_dataset(
         dataFolder,

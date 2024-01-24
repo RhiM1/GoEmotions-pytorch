@@ -39,5 +39,10 @@ def compute_metrics(labels, preds, threshold = None, mode = None):
     results["weighted_precision" + addum], results["weighted_recall" + addum], results[
         "weighted_f1" + addum], _ = precision_recall_fscore_support(
         labels, preds, average="weighted", zero_division = 0)
+    precisions, recalls, f1s, accs = precision_recall_fscore_support(labels, preds)
+    print(f"precisions: {precisions}")
+    print(f"recalls: {recalls}")
+    print(f"f1s: {f1s}")
+    print(f"accs: {accs}")
 
     return results

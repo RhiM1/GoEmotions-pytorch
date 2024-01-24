@@ -21,7 +21,7 @@ from model import ffnn_wrapper, minerva, minerva_detEx, \
 
 from utils import init_logger, set_seed, compute_metrics
 from data_loader import load_and_cache_examples, GoEmotionsProcessor
-from w2v_dataset import get_goem_dataset
+from w2v_dataset import get_goem_dataset, get_stratified_ex_idx
 from LSA_process import get_lsa_dict
 
 from sklearn.metrics import roc_auc_score
@@ -216,8 +216,8 @@ def train(
                 model.save_pretrained(track_reps_dir, epoch)
 
 
-        print(f"\nclass_reps:\n{model.class_reps}\n")
-        print(f"\nclass_reps:\n{model.ex_class_reps[0:5]}\n")
+        # print(f"\nclass_reps:\n{model.class_reps}\n")
+        # print(f"\nclass_reps:\n{model.ex_class_reps[0:5]}\n")
 
         epoch += 1
 
@@ -392,6 +392,10 @@ def main(args):
     # print(train_dataset.tensors[1].size())
     # print(train_dataset.tensors[1].sum(dim = 0))
 
+    print(f"train classes: {train_dataset[torch.arange(len(train_dataset))][1].sum(dim = 1)}")
+    print(f"dev classes: {dev_dataset[torch.arange(len(dev_dataset))][1].sum(dim = 1)}")
+    print(f"test classes: {test_dataset[torch.arange(len(test_dataset))][1].sum(dim = 1)}")
+
     # quit()
 
     example_feats, example_classes = train_dataset[0]
@@ -403,7 +407,10 @@ def main(args):
         model = ffnn_wrapper(args)
     elif args.exemplar:
         if args.fix_ex:
-            ex_IDX = torch.randperm(len(train_dataset))[0:args.num_ex]
+            if args.use_stratified_ex:
+                ex_IDX = get_stratified_ex_idx(train_dataset, args)
+            else:
+                ex_IDX = torch.randperm(len(train_dataset))[0:args.num_ex]
             exemplars = train_dataset[ex_IDX]
             ex_features = exemplars[0]
             ex_classes = exemplars[1]
@@ -558,6 +565,10 @@ if __name__ == '__main__':
     arg_parser.add_argument(
         "--ckpt_dir", help = "only used for BERT", default = "ckpt/csl_paper"
     )
+    arg_parser.add_argument(
+        "--num_classes", help = "number of emotion classes, default 4", default = 4, type = int
+    )
+
 
     # Feats args
     arg_parser.add_argument(
@@ -608,7 +619,13 @@ if __name__ == '__main__':
         "--use_sm", help="use softmax on Minerva activations", default=False, action='store_true'
     )
     arg_parser.add_argument(
+        "--normalize_a", help="use L1 normalization on the activations", default=False, action='store_true'
+    )
+    arg_parser.add_argument(
         "--track_reps", help = "track exemplar reps by saving the model every n epochs", default = None, type = int
+    )
+    arg_parser.add_argument(
+        "--use_stratified_ex", help="use equal exemplars per class", default=False, action='store_true'
     )
 
     # Hyperparameters

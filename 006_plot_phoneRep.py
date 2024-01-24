@@ -53,12 +53,12 @@ def plot_class_and_ex_reps(exReps, exClasses, classOrder=None, classOrderEx=None
         phoneReps = phoneReps[:, classOrder]
         print(np.shape(phoneReps))
 
-    ax = sb.scatterplot(x = -exReps[:, 0], y = -exReps[:, 1], hue = [id_to_class[int(classID)] for classID in ex_checked_classes.tolist()]) #, annot=False, cmap=sb.color_palette("rocket_r", as_cmap=True), cbar_kws={'label': 'Scale'})
+    ax = sb.scatterplot(x = exReps[:, 0], y = exReps[:, 1], hue = [id_to_class[int(classID)] for classID in ex_checked_classes.tolist()]) #, annot=False, cmap=sb.color_palette("rocket_r", as_cmap=True), cbar_kws={'label': 'Scale'})
     ax.set(ylabel="Rep 2", xlabel="Rep 1")
 
     true_class_ids = [1, 2, 4, 8]
     for classID in range(num_classes):
-        plt.text(x = -classReps[classID, 0], y = -classReps[classID, 1], s = id_to_class[true_class_ids[classID]])
+        plt.text(x = classReps[classID, 0], y = classReps[classID, 1], s = id_to_class[true_class_ids[classID]])
 
  
     plt.show()
@@ -134,8 +134,8 @@ def track_class_and_ex_reps(epochs, exReps, exClasses, classOrder=None, classOrd
 
 def main(args):
 
-    epochs = [0, 25, 50, 75, 100, 125]
-    # epochs = None
+    # epochs = [0, 25, 50, 75, 100, 125]
+    epochs = None
 
     ID_to_emotion = {
         0: 'emotion 0',
@@ -181,7 +181,8 @@ if __name__ == "__main__":
         "--model", help="phone classification model: ffnn, minerva2, minerva3", default="minerva"
     )
     parser.add_argument(
-        "--model_folder", help="trained model folder name", default = "sen_trans_minerva_detEx_007_004a_42"
+        # "--model_folder", help="trained model folder name", default = "sen_trans_minerva_detEx_007_004a_42"
+        "--model_folder", help="trained model folder name", default = "sen_trans_minerva_detEx_007_005_42"
     )
 
     args = parser.parse_args()
