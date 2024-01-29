@@ -207,11 +207,12 @@ if __name__ == "__main__":
         # "--model_folder", help="trained model folder name", default = "sen_trans_minerva_detEx_007_004a_42"
         # "--model_folder", help="trained model folder name", default = "sen_trans_minerva_detEx_007_005_42"
         # "--model_folder", help="trained model folder name", default = "sen_trans_minerva_thresh_017_033c2_42"
-        # "--model_folder", help="trained model folder name", default = "sen_trans_minerva_thresh_017_033c2t_42"
+        "--model_folder", help="trained model folder name", default = "sen_trans_minerva_thresh_017_033c2t_42"
         # "--model_folder", help="trained model folder name", default = "sen_trans_minerva_thresh_017_033c2m_42"
         # "--model_folder", help="trained model folder name", default = "sen_trans_minerva_thresh_017_033c2n_42"
-        "--model_folder", help="trained model folder name", default = "sen_trans_minerva_thresh_017_blah_42"
+        # "--model_folder", help="trained model folder name", default = "sen_trans_minerva_thresh_017_blah_42"
         # "--model_folder", help="trained model folder name", default = "sen_trans_minerva_thresh_017_058_42"
+        # "--model_folder", help="trained model folder name", default = "sen_trans_minerva_thresh_017_013c2_42"
     )
 
     args = parser.parse_args()

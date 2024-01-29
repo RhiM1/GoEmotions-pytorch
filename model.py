@@ -633,6 +633,11 @@ class minerva_thresh(base_model):
 
             self.loss_fct = nn.BCEWithLogitsLoss()
 
+            if args.do_feat > 0:
+                self.do_feat = nn.Dropout(p = args.do_feat)
+            else:
+                self.do_feat = None
+
             if args.use_g:
                 feat_dim = args.feat_dim if args.feat_dim is not None else args.input_dim
                 if args.use_ffnn:
@@ -723,6 +728,10 @@ class minerva_thresh(base_model):
 
         # if self.args.train_ex_feats:
         #     ex_features += self.add_ex_feats
+
+        if self.do_feat is not None:
+            features = self.do_feat(features)
+            ex_features = self.do_feat(ex_features)
 
         if self.args.use_g:
             features = self.g(features)

@@ -23,6 +23,42 @@
 #CUDA_VISIBLE_DEVICES=0 python 007_main.py --exp_id 017 --run_id 033c2 --feats_type sen_trans --model_type minerva_thresh --use_thresh --use_mult --class_dim 2 --feat_dim 64 --train_batch_size 512 --learning_rate 1e-1 --lr_ex 1e-3 --lr_cr 1e-2 --weight_decay 1e-2 --wd_ex 1 --wd_cr 1e-2 --p_factor 9 --do_feat 0 --do_class 0 --num_train_epochs 150 --use_g --use_sm --num_ex 4096 --fix_ex --train_ex_class --train_class_reps --track_reps 5
 #CUDA_VISIBLE_DEVICES=0 python 007_main.py --exp_id 017 --run_id 033c2t --feats_type sen_trans --model_type minerva_thresh --use_thresh --class_dim 2 --feat_dim 64 --train_batch_size 512 --learning_rate 1e-1 --lr_ex 1e-3 --lr_cr 1e-2 --weight_decay 1e-2 --wd_ex 1 --wd_cr 1e-2 --p_factor 9 --do_feat 0 --do_class 0 --num_train_epochs 150 --use_g --use_sm --num_ex 4096 --fix_ex --train_ex_class --train_class_reps --track_reps 5
 #CUDA_VISIBLE_DEVICES=0 python 007_main.py --exp_id 017 --run_id 033c2m --feats_type sen_trans --model_type minerva_thresh --use_mult --class_dim 2 --feat_dim 64 --train_batch_size 512 --learning_rate 1e-1 --lr_ex 1e-3 --lr_cr 1e-2 --weight_decay 1e-2 --wd_ex 1 --wd_cr 1e-2 --p_factor 9 --do_feat 0 --do_class 0 --num_train_epochs 150 --use_g --use_sm --num_ex 4096 --fix_ex --train_ex_class --train_class_reps --track_reps 5
-#CUDA_VISIBLE_DEVICES=0 python 007_main.py --exp_id 017 --run_id 033c2n --feats_type sen_trans --model_type minerva_thresh --class_dim 2 --feat_dim 64 --train_batch_size 512 --learning_rate 1e-1 --lr_ex 1e-3 --lr_cr 1e-2 --weight_decay 1e-2 --wd_ex 1 --wd_cr 1e-2 --p_factor 9 --do_feat 0 --do_class 0 --num_train_epochs 150 --use_g --use_sm --num_ex 4096 --fix_ex --train_ex_class --train_class_reps --track_reps 5
+#CUDA_VISIBLE_DEVICES=0 python 008_main.py --exp_id 017 --run_id 033c2n --feats_type sen_trans --skip_wandb --model_type minerva_thresh --class_dim 2 --feat_dim 64 --train_batch_size 512 --learning_rate 1e-1 --lr_ex 1e-3 --lr_cr 1e-2 --weight_decay 1e-2 --wd_ex 1 --wd_cr 1e-2 --p_factor 9 --do_feat 0 --do_class 0 --num_train_epochs 150 --use_g --use_sm --num_ex 4096 --fix_ex --train_ex_class --train_class_reps --auc_av weighted
 
-CUDA_VISIBLE_DEVICES=0 python 007_main.py --exp_id 017 --run_id 058 --feats_type sen_trans --model_type minerva_thresh --use_thresh --use_mult --class_dim 2 --feat_dim 64 --train_batch_size 512 --learning_rate 1e-1 --lr_ex 1e-3 --lr_cr 1e-2 --weight_decay 1e-2 --wd_ex 1 --wd_cr 1e-2 --p_factor 15 --do_feat 0 --do_class 0 --num_train_epochs 150 --use_g --use_sm --num_ex 4096 --fix_ex --train_ex_class --train_class_reps --track_reps 5
+# Untrained Minerva LSA
+#CUDA_VISIBLE_DEVICES=0 python 008_main.py --exp_id 004 --run_id 001_ --feats_type lsa --model_type minerva_thresh --use_sm --p_factor 1 --num_ex 8192 --fix_ex --skip_train
+#CUDA_VISIBLE_DEVICES=0 python 008_main.py --exp_id 004 --run_id 002_ --feats_type lsa --model_type minerva_thresh --use_sm --p_factor 5 --num_ex 8192 --fix_ex --skip_train
+#CUDA_VISIBLE_DEVICES=0 python 008_main.py --exp_id 004 --run_id 003_ --feats_type lsa --model_type minerva_thresh --use_sm --p_factor 10 --num_ex 8192 --fix_ex --skip_train
+#CUDA_VISIBLE_DEVICES=0 python 008_main.py --exp_id 004 --run_id 004_ --feats_type lsa --model_type minerva_thresh --use_sm --p_factor 20 --num_ex 8192 --fix_ex --skip_train
+#CUDA_VISIBLE_DEVICES=0 python 008_main.py --exp_id 004 --run_id 005_ --feats_type lsa --model_type minerva_thresh --use_sm --p_factor 25 --num_ex 8192 --fix_ex --skip_train
+
+# Untrained Minerva word2vec
+#CUDA_VISIBLE_DEVICES=0 python 007_main.py --exp_id 004 --run_id 001 --feats_type word2vec --model_type minerva_thresh --use_sm --p_factor 1 --num_ex 8192 --fix_ex --skip_train
+#CUDA_VISIBLE_DEVICES=0 python 007_main.py --exp_id 004 --run_id 002 --feats_type word2vec --model_type minerva_thresh --use_sm --p_factor 5 --num_ex 8192 --fix_ex --skip_train
+#CUDA_VISIBLE_DEVICES=0 python 007_main.py --exp_id 004 --run_id 003 --feats_type word2vec --model_type minerva_thresh --use_sm --p_factor 10 --num_ex 8192 --fix_ex --skip_train
+#CUDA_VISIBLE_DEVICES=0 python 007_main.py --exp_id 004 --run_id 004 --feats_type word2vec --model_type minerva_thresh --use_sm --p_factor 20 --num_ex 8192 --fix_ex --skip_train
+#CUDA_VISIBLE_DEVICES=0 python 007_main.py --exp_id 004 --run_id 005 --feats_type word2vec --model_type minerva_thresh --use_sm --p_factor 25 --num_ex 8192 --fix_ex --skip_train
+
+#CUDA_VISIBLE_DEVICES=0 python 008_main.py --exp_id 004 --run_id 001_ --feats_type word2vec --model_type minerva_thresh --use_sm --p_factor 1 --num_ex 8192 --fix_ex --skip_train
+#CUDA_VISIBLE_DEVICES=0 python 008_main.py --exp_id 004 --run_id 002_ --feats_type word2vec --model_type minerva_thresh --use_sm --p_factor 5 --num_ex 8192 --fix_ex --skip_train
+#CUDA_VISIBLE_DEVICES=0 python 008_main.py --exp_id 004 --run_id 003_ --feats_type word2vec --model_type minerva_thresh --use_sm --p_factor 10 --num_ex 8192 --fix_ex --skip_train
+#CUDA_VISIBLE_DEVICES=0 python 008_main.py --exp_id 004 --run_id 004_ --feats_type word2vec --model_type minerva_thresh --use_sm --p_factor 20 --num_ex 8192 --fix_ex --skip_train
+#CUDA_VISIBLE_DEVICES=0 python 008_main.py --exp_id 004 --run_id 005_ --feats_type word2vec --model_type minerva_thresh --use_sm --p_factor 25 --num_ex 8192 --fix_ex --skip_train
+
+
+# Untrained Minerva Roberta
+#CUDA_VISIBLE_DEVICES=0 python 007_main.py --exp_id 004 --run_id 001 --feats_type sen_trans --model_type minerva_thresh --use_sm --p_factor 1 --num_ex 8192 --fix_ex --skip_train
+#CUDA_VISIBLE_DEVICES=0 python 007_main.py --exp_id 004 --run_id 002 --feats_type sen_trans --model_type minerva_thresh --use_sm --p_factor 5 --num_ex 8192 --fix_ex --skip_train
+#CUDA_VISIBLE_DEVICES=0 python 007_main.py --exp_id 004 --run_id 003 --feats_type sen_trans --model_type minerva_thresh --use_sm --p_factor 10 --num_ex 8192 --fix_ex --skip_train
+#CUDA_VISIBLE_DEVICES=0 python 007_main.py --exp_id 004 --run_id 004 --feats_type sen_trans --model_type minerva_thresh --use_sm --p_factor 20 --num_ex 8192 --fix_ex --skip_train
+#CUDA_VISIBLE_DEVICES=0 python 007_main.py --exp_id 004 --run_id 005 --feats_type sen_trans --model_type minerva_thresh --use_sm --p_factor 25 --num_ex 8192 --fix_ex --skip_train
+
+#CUDA_VISIBLE_DEVICES=0 python 008_main.py --exp_id 004 --run_id 001_ --feats_type sen_trans --model_type minerva_thresh --use_sm --p_factor 1 --num_ex 8192 --fix_ex --skip_train
+#CUDA_VISIBLE_DEVICES=0 python 008_main.py --exp_id 004 --run_id 002_ --feats_type sen_trans --model_type minerva_thresh --use_sm --p_factor 5 --num_ex 8192 --fix_ex --skip_train
+#CUDA_VISIBLE_DEVICES=0 python 008_main.py --exp_id 004 --run_id 003_ --feats_type sen_trans --model_type minerva_thresh --use_sm --p_factor 10 --num_ex 8192 --fix_ex --skip_train
+#CUDA_VISIBLE_DEVICES=0 python 008_main.py --exp_id 004 --run_id 004_ --feats_type sen_trans --model_type minerva_thresh --use_sm --p_factor 20 --num_ex 8192 --fix_ex --skip_train
+#CUDA_VISIBLE_DEVICES=0 python 008_main.py --exp_id 004 --run_id 005_ --feats_type sen_trans --model_type minerva_thresh --use_sm --p_factor 25 --num_ex 8192 --fix_ex --skip_train
+
+#CUDA_VISIBLE_DEVICES=1 python 008_main.py --exp_id 004 --run_id 001 --feats_type lsa --model_type minerva_thresh --use_sm --p_factor 1 --num_ex 8192 --fix_ex --skip_train
+
+CUDA_VISIBLE_DEVICES=0 python 008_main.py --exp_id 001a --run_id 011 --skip_wandb --feats_type sen_trans --model_type minerva_thresh --auc_av weighted --use_thresh --use_mult --feat_dim 32 --train_batch_size 512 --learning_rate 1e-2 --weight_decay 1e-3 --p_factor 5 --do_feat 0.1 --do_class 0 --num_train_epochs 150 --use_g --use_sm --num_ex 8192 --fix_ex

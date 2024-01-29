@@ -4,6 +4,7 @@ import logging
 import os
 import glob
 import wandb
+from sklearn.metrics import precision_recall_fscore_support, accuracy_score
 
 import numpy as np
 import torch
@@ -19,7 +20,7 @@ from sentence_transformers import SentenceTransformer, util
 from model import ffnn_wrapper, minerva, minerva_detEx, minerva_thresh, \
     BertForMultiLabelClassification, BertMinervaForMultiLabelClassification
 
-from utils import set_seed, compute_metrics #, init_logger
+from utils import init_logger, set_seed, compute_metrics
 from data_loader import load_and_cache_examples, GoEmotionsProcessor
 from w2v_dataset import get_goem_dataset, get_stratified_ex_idx
 from LSA_process import get_lsa_dict
@@ -28,7 +29,7 @@ from sklearn.metrics import roc_auc_score
 
 from constants import DATAROOT_group, DATAROOT_ekman, DATAROOT_original
 
-# logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 def train(
         args,
@@ -80,13 +81,13 @@ def train(
         optimizer.load_state_dict(torch.load(os.path.join(args.model_name_or_path, "optimizer.pt")))
 
     # Train!
-    # logger.info("***** Running training *****")
-    # logger.info("  Num examples = %d", len(train_dataset))
-    # logger.info("  Num Epochs = %d", args.num_train_epochs)
-    # logger.info("  Total train batch size = %d", args.train_batch_size)
-    # logger.info("  Gradient Accumulation steps = %d", args.gradient_accumulation_steps)
-    # logger.info("  Total optimization steps = %d", t_total)
-    # logger.info("  Save steps = %d", args.save_steps)
+    logger.info("***** Running training *****")
+    logger.info("  Num examples = %d", len(train_dataset))
+    logger.info("  Num Epochs = %d", args.num_train_epochs)
+    logger.info("  Total train batch size = %d", args.train_batch_size)
+    logger.info("  Gradient Accumulation steps = %d", args.gradient_accumulation_steps)
+    logger.info("  Total optimization steps = %d", t_total)
+    logger.info("  Save steps = %d", args.save_steps)
 
     # global_step = 0
     tr_loss = 0
@@ -157,10 +158,8 @@ def train(
                 model.zero_grad()
 
         results = evaluate(args, model, dev_dataset, "dev", ex_dataset = train_dataset, epoch = epoch)
-        print(results)
-        quit()
         if args.evaluate_test_during_training:
-            test_results = evaluate(args, model, test_dataset, "test", ex_dataset = train_dataset, epoch = epoch, threshold = results["threshold"])
+            test_results = evaluate(args, model, test_dataset, "test", ex_dataset = train_dataset, epoch = epoch, thresholds = results["threshold"])
             results.update(test_results)
         results['train_loss'] = tr_loss / len(train_dataloader)
         results['epoch'] = epoch
@@ -185,11 +184,11 @@ def train(
                 tokenizer.save_pretrained(output_dir)
 
             torch.save(args, os.path.join(output_dir, "training_args.bin"))
-            # logger.info("Saving model checkpoint to {}".format(output_dir))
+            logger.info("Saving model checkpoint to {}".format(output_dir))
 
             if args.save_optimizer:
                 torch.save(optimizer.state_dict(), os.path.join(output_dir, "optimizer.pt"))
-                # logger.info("Saving optimizer and scheduler states to {}".format(output_dir))
+                logger.info("Saving optimizer and scheduler states to {}".format(output_dir))
 
         if results['weighted_f1_dev'] > best_weighted_f1_dev:
 
@@ -222,7 +221,7 @@ def train(
         # print(f"\nclass_reps:\n{model.class_reps}\n")
         # print(f"\nclass_reps:\n{model.ex_class_reps[0:5]}\n")
 
-        print(f"thresholds: {model.thresh}")
+        # print(f"thresholds: {model.thresh}")
         epoch += 1
 
     if not args.skip_wandb:
@@ -231,7 +230,7 @@ def train(
     return best_epoch
 
 
-def evaluate(args, model, eval_dataset, mode, ex_dataset = None, epoch=None, threshold = None):
+def evaluate(args, model, eval_dataset, mode, ex_dataset = None, epoch=None, thresholds = None):
     results = {}
     eval_sampler = SequentialSampler(eval_dataset)
     eval_dataloader = DataLoader(eval_dataset, sampler=eval_sampler, batch_size=args.eval_batch_size)
@@ -241,12 +240,12 @@ def evaluate(args, model, eval_dataset, mode, ex_dataset = None, epoch=None, thr
         ex_dataloader = iter(DataLoader(ex_dataset, sampler=RandomSampler(ex_dataset), batch_size=args.num_ex))
 
     # Eval!
-    # if epoch != None:
-    #     logger.info("***** Running evaluation on {} dataset ({} epoch) *****".format(mode, epoch))
-    # else:
-    #     logger.info("***** Running evaluation on {} dataset *****".format(mode))
-    # logger.info("  Num examples = {}".format(len(eval_dataset)))
-    # logger.info("  Eval Batch size = {}".format(args.eval_batch_size))
+    if epoch != None:
+        logger.info("***** Running evaluation on {} dataset ({} epoch) *****".format(mode, epoch))
+    else:
+        logger.info("***** Running evaluation on {} dataset *****".format(mode))
+    logger.info("  Num examples = {}".format(len(eval_dataset)))
+    logger.info("  Eval Batch size = {}".format(args.eval_batch_size))
     eval_loss = 0.0
     nb_eval_steps = 0
     preds = None
@@ -303,43 +302,58 @@ def evaluate(args, model, eval_dataset, mode, ex_dataset = None, epoch=None, thr
     }
     
     preds_ = np.copy(preds)
-    if threshold is None:
-        best_f1 = 0.0
+    if thresholds is None:
+        best_f1s = [0.0] * args.num_classes
+        thresholds = [0] * args.num_classes
         for threshold in args.threshold:
-
             preds_[preds > threshold] = 1
             preds_[preds <= threshold] = 0
-            result = compute_metrics(out_label_ids, preds_, mode = mode)
-            if result['weighted_f1_' + mode] > best_f1:
-                best_f1 = result['weighted_f1_' + mode]
-                results.update(result)
-                results['threshold'] = threshold
+            _, _, f1s, _ = precision_recall_fscore_support(out_label_ids, preds_)
+            for class_id in range(args.num_classes):
+                if f1s[class_id] > best_f1s[class_id]:
+                    # print(f"class {class_id}, old f1: {best_f1s[class_id]}, new f1: {f1s[class_id]}")
+                    thresholds[class_id] = threshold
+                    best_f1s[class_id]= f1s[class_id]
 
-                detailed_results = {}
+    for class_id in range(args.num_classes):
+        preds_[preds[:, class_id] > thresholds[class_id], class_id] = 1
+        preds_[preds[:, class_id] <= thresholds[class_id], class_id] = 0
+        
+    result = compute_metrics(out_label_ids, preds_, mode = mode)
 
-                for emotion in range(args.num_labels):
-                    detailed_results[str(emotion) + "_tp"] = np.logical_and(preds_[:, emotion] == 1, out_label_ids[:, emotion] == 1).astype(np.float32).sum(axis = 0)
-                    detailed_results[str(emotion) + "_tn"] = np.logical_and(preds_[:, emotion] == 0, out_label_ids[:, emotion] == 0).astype(np.float32).sum(axis = 0)
-                    detailed_results[str(emotion) + "_fp"] = np.logical_and(preds_[:, emotion] == 1, out_label_ids[:, emotion] == 0).astype(np.float32).sum(axis = 0)
-                    detailed_results[str(emotion) + "_fn"] = np.logical_and(preds_[:, emotion] == 0, out_label_ids[:, emotion] == 1).astype(np.float32).sum(axis = 0)
+    # best_f1 = result['weighted_f1_' + mode]
+    results.update(result)
+    results['threshold'] = thresholds
 
-                # print(f"threshold: {threshold} \n{detailed_results}")
+    detailed_results = {}
 
-    else:
-        preds_[preds > threshold] = 1
-        preds_[preds <= threshold] = 0
-        result = compute_metrics(out_label_ids, preds_, mode = mode)
-        results.update(result)
+    for emotion in range(args.num_labels):
+        detailed_results[str(emotion) + "_tp"] = np.logical_and(preds_[:, emotion] == 1, out_label_ids[:, emotion] == 1).astype(np.float32).sum(axis = 0)
+        detailed_results[str(emotion) + "_tn"] = np.logical_and(preds_[:, emotion] == 0, out_label_ids[:, emotion] == 0).astype(np.float32).sum(axis = 0)
+        detailed_results[str(emotion) + "_fp"] = np.logical_and(preds_[:, emotion] == 1, out_label_ids[:, emotion] == 0).astype(np.float32).sum(axis = 0)
+        detailed_results[str(emotion) + "_fn"] = np.logical_and(preds_[:, emotion] == 0, out_label_ids[:, emotion] == 1).astype(np.float32).sum(axis = 0)
 
-        detailed_results = {}
+            # print(f"threshold: {threshold} \n{detailed_results}")
 
-        for emotion in range(args.num_labels):
-            detailed_results[str(emotion) + "_tp"] = np.logical_and(preds_[:, emotion] == 1, out_label_ids[:, emotion] == 1).astype(np.float32).sum(axis = 0)
-            detailed_results[str(emotion) + "_tn"] = np.logical_and(preds_[:, emotion] == 0, out_label_ids[:, emotion] == 0).astype(np.float32).sum(axis = 0)
-            detailed_results[str(emotion) + "_fp"] = np.logical_and(preds_[:, emotion] == 1, out_label_ids[:, emotion] == 0).astype(np.float32).sum(axis = 0)
-            detailed_results[str(emotion) + "_fn"] = np.logical_and(preds_[:, emotion] == 0, out_label_ids[:, emotion] == 1).astype(np.float32).sum(axis = 0)
+    # else:
+    #     # preds_[preds > threshold] = 1
+    #     # preds_[preds <= threshold] = 0
+        
+    #     for class_id in range(args.num_classes):
+    #         preds_[:, class_id][preds[:, class_id] > class_thresholds[class_id]] = 1
+    #         preds_[:, class_id][preds[:, class_id] <= class_thresholds[class_id]] = 0
+    #     result = compute_metrics(out_label_ids, preds_, mode = mode)
+    #     results.update(result)
 
-    results[f'roc_auc_{mode}'] = roc_auc_score(out_label_ids, preds)
+    #     detailed_results = {}
+
+    #     for emotion in range(args.num_labels):
+    #         detailed_results[str(emotion) + "_tp"] = np.logical_and(preds_[:, emotion] == 1, out_label_ids[:, emotion] == 1).astype(np.float32).sum(axis = 0)
+    #         detailed_results[str(emotion) + "_tn"] = np.logical_and(preds_[:, emotion] == 0, out_label_ids[:, emotion] == 0).astype(np.float32).sum(axis = 0)
+    #         detailed_results[str(emotion) + "_fp"] = np.logical_and(preds_[:, emotion] == 1, out_label_ids[:, emotion] == 0).astype(np.float32).sum(axis = 0)
+    #         detailed_results[str(emotion) + "_fn"] = np.logical_and(preds_[:, emotion] == 0, out_label_ids[:, emotion] == 1).astype(np.float32).sum(axis = 0)
+
+    results[f'roc_auc_{mode}'] = roc_auc_score(out_label_ids, preds, average = args.auc_av)
 
     output_dir = os.path.join(args.output_dir, mode)
     if not os.path.exists(output_dir):
@@ -347,16 +361,16 @@ def evaluate(args, model, eval_dataset, mode, ex_dataset = None, epoch=None, thr
 
     output_eval_file = os.path.join(output_dir, "{}-{}.txt".format(mode, epoch) if epoch else "{}.txt".format(mode))
     with open(output_eval_file, "w") as f_w:
-        # logger.info("***** Eval results on {} dataset *****".format(mode))
+        logger.info("***** Eval results on {} dataset *****".format(mode))
         for key in sorted(results.keys()):
-            # logger.info("  {} = {}".format(key, str(results[key])))
+            logger.info("  {} = {}".format(key, str(results[key])))
             f_w.write("  {} = {}\n".format(key, str(results[key])))
 
     output_eval_file = os.path.join(output_dir, "{}-{}_detailed.txt".format(mode, epoch) if epoch else "{}.txt".format(mode))
     with open(output_eval_file, "w") as f_w:
-        # logger.info("***** Eval results on {} dataset *****".format(mode))
+        logger.info("***** Eval results on {} dataset *****".format(mode))
         for key in sorted(detailed_results.keys()):
-            # logger.info("  {} = {}".format(key, str(detailed_results[key])))
+            logger.info("  {} = {}".format(key, str(detailed_results[key])))
             f_w.write("  {} = {}\n".format(key, str(detailed_results[key])))
 
     return results
@@ -364,8 +378,8 @@ def evaluate(args, model, eval_dataset, mode, ex_dataset = None, epoch=None, thr
 
 def main(args):
 
-    # logger.info("Training/evaluation parameters {}".format(args))
-    # init_logger()
+    logger.info("Training/evaluation parameters {}".format(args))
+    init_logger()
     set_seed(args)
 
     tokenizer = None
@@ -459,7 +473,8 @@ def main(args):
                 f"cd{args.class_dim}",
                 f"bn{int(args.use_batch_norm)}",
                 f"s{args.seed}",
-                f"{args.model_name_or_path}"
+                f"{args.model_name_or_path}",
+                f"aa_{args.auc_av}"
             ]
         )
         if args.exemplar:
@@ -693,6 +708,9 @@ if __name__ == '__main__':
     )
     arg_parser.add_argument(
         "--no_cuda", help="", default=False, action='store_true'
+    )
+    arg_parser.add_argument(
+        "--auc_av", help="ROC AUC average method: micro, macro, weighted, samples", default='macro'
     )
 
 

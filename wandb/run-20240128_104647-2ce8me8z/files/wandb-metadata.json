@@ -1,0 +1,141 @@
+{
+    "os": "Linux-5.10.60.1-microsoft-standard-WSL2-x86_64-with-glibc2.17",
+    "python": "3.8.16",
+    "heartbeatAt": "2024-01-28T10:46:47.860531",
+    "startedAt": "2024-01-28T10:46:47.090125",
+    "docker": null,
+    "cuda": null,
+    "args": [
+        "--exp_id",
+        "004",
+        "--run_id",
+        "005_",
+        "--feats_type",
+        "lsa",
+        "--model_type",
+        "minerva_thresh",
+        "--use_sm",
+        "--p_factor",
+        "25",
+        "--num_ex",
+        "8192",
+        "--fix_ex",
+        "--skip_train"
+    ],
+    "state": "running",
+    "program": "008_main.py",
+    "codePath": "008_main.py",
+    "git": {
+        "remote": "https://github.com/RhiM1/GoEmotions-pytorch.git",
+        "commit": "6e2996d60747c8ac0bcdde76cac3ad14a7a46fd7"
+    },
+    "email": "rmogridg1@sheffield.ac.uk",
+    "root": "/home/acp20rm/exp/GoEmotions-pytorch",
+    "host": "RhiBot",
+    "username": "acp20rm",
+    "executable": "/home/acp20rm/miniconda3/envs/minerva/bin/python",
+    "cpu_count": 8,
+    "cpu_count_logical": 16,
+    "cpu_freq": {
+        "current": 3791.9959999999996,
+        "min": 0.0,
+        "max": 0.0
+    },
+    "cpu_freq_per_core": [
+        {
+            "current": 3791.996,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3791.996,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3791.996,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3791.996,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3791.996,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3791.996,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3791.996,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3791.996,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3791.996,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3791.996,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3791.996,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3791.996,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3791.996,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3791.996,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3791.996,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 3791.996,
+            "min": 0.0,
+            "max": 0.0
+        }
+    ],
+    "disk": {
+        "total": 250.98248672485352,
+        "used": 235.01541137695312
+    },
+    "gpu": "NVIDIA GeForce RTX 3080",
+    "gpu_count": 1,
+    "gpu_devices": [
+        {
+            "name": "NVIDIA GeForce RTX 3080",
+            "memory_total": 10737418240
+        }
+    ],
+    "memory": {
+        "total": 15.557411193847656
+    }
+}
