@@ -136,3 +136,4 @@ cached*
 ckpt*
 
 data/LSA/*
+wandb*
