@@ -17,7 +17,8 @@ import gensim.downloader as api
 #     get_linear_schedule_with_warmup, get_constant_schedule_with_warmup
 from sentence_transformers import SentenceTransformer, util
 
-from model import ffnn_wrapper, minerva, minerva_ffnn, ffnn_init
+from model import ffnn_wrapper, minerva, minerva_detEx, minerva_thresh, \
+    BertForMultiLabelClassification, BertMinervaForMultiLabelClassification
 
 from utils import init_logger, set_seed, compute_metrics
 from data_loader import load_and_cache_examples, GoEmotionsProcessor
@@ -54,27 +55,22 @@ def train(
 
     optParams = []
     # print(f"model parameters:\n{model.named_parameters()}")
-    if args.train_alpha:
-        optParams.append(
-            {'params': model.alpha, 'weight_decay': 0, 'lr': args.lr_cr}
-        )
-    else:
-        for name, param in model.named_parameters():
-            # if name == "class_reps" or name == "thresh":
-            if name == "class_reps":
-                optParams.append(
-                    {'params': param, 'weight_decay': args.wd_cr, 'lr': args.lr_cr}
-                )
-            elif name == "ex_class_reps" or name == "ex_features":
-                optParams.append(
-                    {'params': param, 'weight_decay': args.wd_ex, 'lr': args.lr_ex}
-                )
-            else:
-                optParams.append(
-                    {'params': param, 'weight_decay': args.weight_decay, 'lr': args.learning_rate}
-                )
-            print(name, optParams[-1]['weight_decay'], optParams[-1]['lr'])
-        
+    for name, param in model.named_parameters():
+        # if name == "class_reps" or name == "thresh":
+        if name == "class_reps":
+            optParams.append(
+                {'params': param, 'weight_decay': args.wd_cr, 'lr': args.lr_cr}
+            )
+        elif name == "ex_class_reps" or name == "ex_features":
+            optParams.append(
+                {'params': param, 'weight_decay': args.wd_ex, 'lr': args.lr_ex}
+            )
+        else:
+            optParams.append(
+                {'params': param, 'weight_decay': args.weight_decay, 'lr': args.learning_rate}
+            )
+        print(name, optParams[-1]['weight_decay'], optParams[-1]['lr'])
+    
     # optimizer = torch.optim.Adam(optParams, lr=args.learning_rate, eps=args.adam_epsilon)
     optimizer = torch.optim.AdamW(optParams, eps=args.adam_epsilon)
 
@@ -100,7 +96,6 @@ def train(
     epoch = 1
     best_epoch = 0
     best_roc_auc = 0
-    best_dev_loss = 999
     best_results = {}
     model.zero_grad()
     train_iterator = trange(int(args.num_train_epochs), desc="Epoch")
@@ -146,8 +141,7 @@ def train(
                     inputs['ex_features'] = ex_features.to(args.device)
                     inputs['ex_classes'] = ex_classes.to(args.device)
 
-            output = model(**inputs)
-            loss = output['loss']
+            loss, _ = model(**inputs)
 
             if args.gradient_accumulation_steps > 1:
                 loss = loss / args.gradient_accumulation_steps
@@ -172,19 +166,19 @@ def train(
             
         if not args.skip_wandb:
             wandb.log(results)
-
-        if (results['dev_loss'] < best_dev_loss and args.train_alpha) or \
-            results['roc_auc_dev'] > best_roc_auc:
+        
+        if results['roc_auc_dev'] > best_roc_auc:
 
             best_roc_auc = results['roc_auc_dev']
-            best_dev_loss = results['dev_loss']
             best_results['best_roc_auc_dev'] = results['roc_auc_dev']
             best_results['best_roc_auc_test'] = results['roc_auc_test']
             best_results['best_roc_auc_epoch'] = epoch
 
             if not os.path.exists(output_dir):
                 os.makedirs(output_dir)
-                
+            # model_to_save = (
+            #     model.module if hasattr(model, "module") else model
+            # )
             model.save_pretrained(output_dir)
             if tokenizer is not None:
                 tokenizer.save_pretrained(output_dir)
@@ -291,9 +285,7 @@ def evaluate(args, model, eval_dataset, mode, ex_dataset = None, epoch=None, thr
                     inputs['ex_features'] = ex_features.to(args.device)
                     inputs['ex_classes'] = ex_classes.to(args.device)
 
-            output = model(**inputs)
-            tmp_eval_loss = output['loss']
-            logits = output['logits']
+            tmp_eval_loss, logits = model(**inputs)
 
             eval_loss += tmp_eval_loss.mean().item()
         nb_eval_steps += 1
@@ -421,10 +413,8 @@ def main(args):
 
     if args.model_type == 'ffnn':
         model = ffnn_wrapper(args)
-    elif args.exemplar or args.model_type == 'ffnn_init':
-        if args.fix_ex or args.model_type == 'ffnn_init':
-            if args.model_type == 'ffnn_init':
-                args.num_ex = args.feat_dim
+    elif args.exemplar:
+        if args.fix_ex:
             if args.use_stratified_ex:
                 ex_IDX = get_stratified_ex_idx(train_dataset, args)
             else:
@@ -443,20 +433,19 @@ def main(args):
                 ex_features = ex_features,
                 ex_IDX = ex_IDX
             )
-        elif args.model_type == 'minerva_ffnn':
-            model = minerva_ffnn(
+        elif args.model_type == 'minerva_detEx':
+            model = minerva_detEx(
                 args,
                 ex_classes = ex_classes,
                 ex_features = ex_features,
                 ex_IDX = ex_IDX
             )
-        elif args.model_type == 'ffnn_init':
-            model = ffnn_init(
-                args
-            )
-            model.initialise_layers(
-                args.minerva_initialisation, 
-                (ex_features, ex_classes)
+        elif args.model_type == 'minerva_thresh':
+            model = minerva_thresh(
+                args,
+                ex_classes = ex_classes,
+                ex_features = ex_features,
+                ex_IDX = ex_IDX
             )
 
     model.to(args.device)
@@ -510,37 +499,35 @@ def main(args):
     if not args.skip_wandb:
         wandb.log(init_dev_results)
 
-    if args.train_alpha:
-        # epochs
-        # wanvd
-        epochs = args.num_train_epochs
-        args.num_train_epochs = args.alpha_epochs
-        alpha_epoch = train(args, model, train_dataset, tokenizer, dev_dataset, test_dataset)
-        args.train_alpha = False
-        model.alpha.requires_grad_(False)
-        args.num_train_epochs = epochs
-
     if not args.skip_train:
         best_epoch = train(args, model, train_dataset, tokenizer, dev_dataset, test_dataset)
         # logger.info(" global_step = {}, average loss = {}".format(global_step, tr_loss))
 
     results = {}
     if args.do_eval:
+        # checkpoints = list(
+        #     os.path.dirname(c) for c in sorted(glob.glob(args.output_dir + "/**/" + "pytorch_model.bin", recursive=True))
+        # )
+        # if not args.eval_all_checkpoints:
+        #     checkpoints = checkpoints[-1:]
+        # else:
+        #     logging.getLogger("transformers.configuration_utils").setLevel(logging.WARN)  # Reduce logging
+        #     logging.getLogger("transformers.modeling_utils").setLevel(logging.WARN)  # Reduce logging
+        # logger.info("Evaluate the following checkpoints: %s", checkpoints)
+        # for checkpoint in checkpoints:
+
+
+        # global_step = checkpoint.split("-")[-1]
+        # model = BertMinervaForMultiLabelClassification.from_pretrained(checkpoint)
         if args.skip_train:
             best_epoch = 0
         else:
             model.load_pretrained(args.output_dir + "/checkpoint")
             model.to(args.device)
 
-        dev_result = evaluate(args, model, dev_dataset, mode="dev", epoch=0)
-        print(f"Thresholds: \n{dev_result['threshold']}")
-        result = evaluate(args, model, test_dataset, mode="test", epoch=best_epoch, thresholds = dev_result['threshold'])
-        print(f"result:\n{result}")
-        if (args.skip_train or (not args.evaluate_test_during_training)) and (not args.skip_wandb):
-            wandb.log(result)
+        result = evaluate(args, model, test_dataset, mode="test", epoch=best_epoch)
         result = dict((k + "_{}".format(best_epoch), v) for k, v in result.items())
         results.update(result)
-        print(f"results:\n{results}")
 
         output_eval_file = os.path.join(args.output_dir, "eval_results.txt")
         with open(output_eval_file, "w") as f_w:
@@ -566,7 +553,7 @@ if __name__ == '__main__':
         "--skip_wandb", help="Don't use WandB logging", default=False, action='store_true'
     )
     arg_parser.add_argument(
-        "--wandb_project", help = "WandB project name", default = "IS_goemotions"
+        "--wandb_project", help = "WandB project name", default = "CSL_goemotions"
     )
     arg_parser.add_argument(
         "--evaluate_test_during_training", help="", default=True, action='store_true'
@@ -666,27 +653,6 @@ if __name__ == '__main__':
     arg_parser.add_argument(
         "--use_stratified_ex", help="use equal exemplars per class", default=False, action='store_true'
     )
-    arg_parser.add_argument(
-        "--minerva_initialisation", help = "model initialisation: minerva, minerva2, minerva3, default None", default = None
-    )
-    arg_parser.add_argument(
-        "--act0", help = "model initialisation: minerva, minerva2, minerva3, default None", default = "ReLU"
-    )
-    arg_parser.add_argument(
-        "--act1", help = "model initialisation: minerva, minerva2, minerva3, default None", default = "ReLU"
-    )
-    arg_parser.add_argument(
-        "--use_layer_norm", help="use layer normalization", default=False, action='store_true'
-    )
-    arg_parser.add_argument(
-        "--alpha", help = "temperature correction for parameters", default = 1, type = float
-    )
-    arg_parser.add_argument(
-        "--train_alpha", help="use layer normalization", default=False, action='store_true'
-    )
-    arg_parser.add_argument(
-        "--alpha_epochs", help = "number of epoch to train alpha for", default = 10, type = int
-    )
 
     # Hyperparameters
     arg_parser.add_argument(
@@ -702,7 +668,7 @@ if __name__ == '__main__':
         "--weight_decay", help = "number of training epochs", default = 0, type = float
     )
     arg_parser.add_argument(
-        "--wd_ex", help = "weight decay for the exemplar represenations, minerva only", default = None, type = float
+        "--wd_ex", help = "weight decay for the exemplar represenations, minerva only", default = 0, type = float
     )
     arg_parser.add_argument(
         "--wd_cr", help = "weight decay for the exemplar represenations, minerva only", default = None, type = float
@@ -751,7 +717,7 @@ if __name__ == '__main__':
     args = arg_parser.parse_args()
 
 
-    if args.model_type == 'minerva' or args.model_type == 'minerva_ffnn':
+    if args.model_type == 'minerva' or args.model_type == 'minerva_detEx' or args.model_type == 'minerva_thresh':
         args.exemplar = True
     else:
         args.exemplar = False
@@ -769,7 +735,7 @@ if __name__ == '__main__':
     args.dev_file = "dev.tsv"
     args.test_file = "test.tsv"
     args.label_file = "labels.txt"
-    args.threshold = [i/40 for i in range(40)]
+    args.threshold = [i/40 for i in range(-20, 21, 1)]
     if args.feats_type == 'sen_trans' and args.model_name_or_path == " ":
         args.model_name_or_path = 'paraphrase-mpnet-base-v2'
         # args.model_name_or_path = "all-MiniLM-L6-v2"
@@ -781,9 +747,7 @@ if __name__ == '__main__':
         args.lr_ex = args.learning_rate
     if args.lr_cr is None:
         args.lr_cr = args.lr_ex
-        
-    if args.wd_ex is None:
-        args.wd_ex = args.weight_decay
+
     if args.wd_cr is None:
         args.wd_cr = args.wd_ex
 

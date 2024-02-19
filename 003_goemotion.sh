@@ -1,4 +1,20 @@
 #!/bin/bash
+
+#CUDA_VISIBLE_DEVICES=0 python 001_is_main.py --exp_id test --run_id test --feats_type sen_trans --model_type ffnn_init --auc_av weighted --class_dim 1024 --feat_dim 1024 --act0 ReLU --act1 ReLU --num_train_epochs 150 --train_batch_size 512 --learning_rate 1e-4 --weight_decay 2 --do_class 0.8
+#CUDA_VISIBLE_DEVICES=0 python 001_is_main.py --exp_id test --run_id 001_m1 --feats_type sen_trans --model_type ffnn_init --minerva_initialisation minerva --auc_av weighted --class_dim 1024 --feat_dim 1024 --act0 ReLU --act1 ReLU --num_train_epochs 150 --train_batch_size 512 --learning_rate 1e-4 --weight_decay 2 --do_class 0.8
+#CUDA_VISIBLE_DEVICES=0 python 001_is_main.py --exp_id test --run_id 001_m2 --feats_type sen_trans --model_type ffnn_init --minerva_initialisation minerva2 --auc_av weighted --class_dim 1024 --feat_dim 1024 --act0 ReLU --act1 ReLU --num_train_epochs 150 --train_batch_size 512 --learning_rate 1e-4 --weight_decay 2 --do_class 0.8
+#CUDA_VISIBLE_DEVICES=0 python 001_is_main.py --exp_id test --run_id 001_m3 --feats_type sen_trans --model_type ffnn_init --minerva_initialisation minerva3 --auc_av weighted --class_dim 1024 --feat_dim 1024 --act0 ReLU --act1 ReLU --num_train_epochs 150 --train_batch_size 512 --learning_rate 1e-4 --weight_decay 2 --do_class 0.8
+#CUDA_VISIBLE_DEVICES=0 python 001_is_main.py --exp_id test --run_id 001_m3 --feats_type sen_trans --model_type ffnn_init --minerva_initialisation minerva3 --train_alpha --auc_av weighted --class_dim 1024 --feat_dim 1024 --act0 ReLU --act1 ReLU --num_train_epochs 2 --lr_cr 1e-1 --train_batch_size 512 --learning_rate 1e-4 --weight_decay 2 --do_class 0.8
+
+#CUDA_VISIBLE_DEVICES=0 python 001_is_main.py --exp_id test --run_id 001_m1 --feats_type sen_trans --model_type ffnn_init --minerva_initialisation minerva --auc_av weighted --feat_dim 1024 --act0 ReLU --act1 ReLU --num_train_epochs 150 --train_batch_size 512 --learning_rate 1e-4 --weight_decay 2 --do_class 0.8
+#CUDA_VISIBLE_DEVICES=0 python 001_is_main.py --exp_id test --run_id 001_m2 --feats_type sen_trans --model_type ffnn_init --minerva_initialisation minerva2 --auc_av weighted --feat_dim 1024 --act0 ReLU --act1 ReLU --num_train_epochs 150 --train_batch_size 512 --learning_rate 1e-4 --weight_decay 2 --do_class 0.8
+#CUDA_VISIBLE_DEVICES=0 python 001_is_main.py --exp_id test --run_id 001_m3 --feats_type sen_trans --model_type ffnn_init --minerva_initialisation minerva3 --auc_av weighted --feat_dim 1024 --act0 ReLU --act1 ReLU --num_train_epochs 150 --train_batch_size 512 --learning_rate 1e-4 --weight_decay 2 --do_class 0.8
+
+
+CUDA_VISIBLE_DEVICES=0 python 001_is_main.py --exp_id 010 --run_id 010 --feats_type lsa --model_type minerva_ffnn --auc_av weighted --p_factor 10 --num_ex 8192 --fix_ex --skip_train
+
+
+
 #CUDA_VISIBLE_DEVICES=0 python 004_main.py --skip_wandb --use_batch_norm --exp_id test --run_id 002c --feats_type lsa --model_type minerva_detEx --feat_dim 32 --train_batch_size 512 --learning_rate 1e-3 --weight_decay 1e-2 --wd_ex 0.01 --p_factor 3 --do_feat 0 --do_class 0 --num_train_epochs 150 --use_g --num_ex 128 --fix_ex --train_class_reps --train_ex_class
 #CUDA_VISIBLE_DEVICES=0 python 003_main.py --exp_id 002 --run_id 003c --feats_type sen_trans --model_type minerva --feat_dim 32 --train_batch_size 512 --learning_rate 1e-3 --weight_decay 1e-2 --wd_ex 0.01 --p_factor 3 --do_feat 0.1 --do_class 0 --num_train_epochs 150 --use_g --num_ex 128 --fix_ex --train_class_reps --train_ex_class
 #CUDA_VISIBLE_DEVICES=0 python 004_main.py --exp_id test --run_id 001 --feats_type sen_trans --model_type ffnn --class_dim 512 --num_train_epochs 3 --train_batch_size 512 --learning_rate 1e-4 --weight_decay 1e-1 --do_class 0.5
@@ -61,4 +77,4 @@
 
 #CUDA_VISIBLE_DEVICES=1 python 008_main.py --exp_id 004 --run_id 001 --feats_type lsa --model_type minerva_thresh --use_sm --p_factor 1 --num_ex 8192 --fix_ex --skip_train
 
-CUDA_VISIBLE_DEVICES=0 python 008_main.py --exp_id 001a --run_id 011 --skip_wandb --feats_type sen_trans --model_type minerva_thresh --auc_av weighted --use_thresh --use_mult --feat_dim 32 --train_batch_size 512 --learning_rate 1e-2 --weight_decay 1e-3 --p_factor 5 --do_feat 0.1 --do_class 0 --num_train_epochs 150 --use_g --use_sm --num_ex 8192 --fix_ex
+#CUDA_VISIBLE_DEVICES=0 python 008_main.py --exp_id 001a --run_id 011 --skip_wandb --feats_type sen_trans --model_type minerva_thresh --auc_av weighted --use_thresh --use_mult --feat_dim 32 --train_batch_size 512 --learning_rate 1e-2 --weight_decay 1e-3 --p_factor 5 --do_feat 0.1 --do_class 0 --num_train_epochs 150 --use_g --use_sm --num_ex 8192 --fix_ex
