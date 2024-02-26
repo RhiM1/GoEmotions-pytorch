@@ -652,7 +652,7 @@ if __name__ == '__main__':
         "--num_ex", help = "number of exemplars to use for minerva", default = None, type = int
     )
     arg_parser.add_argument(
-        "--fix_ex", help="fix the exemplar set, rather than changing per minibatch", default=False, action='store_true'
+        "--fix_ex", help="fix the exemplar set, rather than changing per minibatch", default=True, action='store_true'
     )
     arg_parser.add_argument(
         "--use_sm", help="use softmax on Minerva activations", default=False, action='store_true'
@@ -693,7 +693,7 @@ if __name__ == '__main__':
         "--max_seq_len", help = "only used for BERT", default = 50, type = int
     )
     arg_parser.add_argument(
-        "--num_train_epochs", help = "number of training epochs", default = 10, type = int
+        "--num_train_epochs", help = "number of training epochs", default = 150, type = int
     )
     arg_parser.add_argument(
         "--warmup_epochs", help = "number of training epochs", default = 1, type = int
@@ -744,7 +744,7 @@ if __name__ == '__main__':
         "--no_cuda", help="", default=False, action='store_true'
     )
     arg_parser.add_argument(
-        "--auc_av", help="ROC AUC average method: micro, macro, weighted, samples", default='macro'
+        "--auc_av", help="ROC AUC average method: micro, macro, weighted, samples", default='weighted'
     )
 
 

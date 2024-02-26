@@ -286,28 +286,18 @@ class ffnn_init(base_model):
 
         self.loss_fct = nn.BCEWithLogitsLoss()
         
-        # self.ffnn_stack = ffnn(
-        #     input_dim = args.input_dim,
-        #     embed_dim = args.class_dim,
-        #     output_dim = args.num_labels,
-        #     dropout = args.do_class,
-        #     batch_norm = args.use_batch_norm
-        # )
-
-        class_dim = self.args.class_dim if self.args.class_dim is not None else self.args.num_classes
-
         self.layer0 = nn.Linear(args.input_dim, args.feat_dim)
         self.do0 = nn.Dropout(p = args.do_class)
         self.activation0 = self.select_activation(args.act0)
-        self.layer1 = nn.Linear(args.feat_dim, class_dim)
+        self.layer1 = nn.Linear(args.feat_dim, args.class_dim)
         self.do1 = nn.Dropout(p = args.do_class)
         self.activation1 = self.select_activation(args.act1)
-        self.layer2 = nn.Linear(class_dim, args.num_classes)
+        self.layer2 = nn.Linear(args.class_dim, args.num_classes)
 
         if args.use_layer_norm:
             self.ln0 = nn.LayerNorm(args.input_dim)
             self.ln1 = nn.LayerNorm(args.feat_dim)
-            self.ln2 = nn.LayerNorm(class_dim)
+            self.ln2 = nn.LayerNorm(args.class_dim)
             
         alpha = torch.tensor([self.args.alpha], dtype = torch.float)
         self.alpha = nn.Parameter(alpha, requires_grad = self.args.train_alpha)
@@ -429,9 +419,7 @@ class ffnn_init(base_model):
             quit()
     
 
-
     def forward(self, features, labels, debug = False):
-
 
         if self.args.use_layer_norm:
             features = self.ln0(features)
@@ -1083,69 +1071,42 @@ class minerva_ffnn(base_model):
 
             self.loss_fct = nn.BCEWithLogitsLoss()
 
-            if args.do_feat > 0:
-                self.do_feat = nn.Dropout(p = args.do_feat)
-            else:
-                self.do_feat = None
-
-            if args.use_g:
-                feat_dim = args.feat_dim if args.feat_dim is not None else args.input_dim
+            if args.feat_dim is not None:
                 self.g = nn.Sequential(
                     nn.Linear(
                         in_features = self.args.input_dim,
-                        out_features = feat_dim
+                        out_features = args.feat_dim
                     ),
                     nn.Dropout(p = args.do_feat)
                 )
 
+            self.do_class = nn.Dropout(p = args.do_class)
+
+            if args.class_dim is not None:
+                class_reps = torch.rand(args.num_classes, args.class_dim)
+            else:
+                class_reps = torch.eye(args.num_classes, dtype = torch.float)
+
+            if args.train_class_reps:
+                self.class_reps = nn.Parameter(class_reps)
+            else:
+                self.register_buffer('class_reps', class_reps)
+
+            if args.train_ex_class:
+                self.ex_class_reps = nn.Parameter(ex_classes)
+            else:
+                self.register_buffer('ex_class_reps', ex_classes)
+
             self.minerva = minerva2(p_factor = args.p_factor, use_sm = args.use_sm)
+            
+            self.register_buffer('ex_idx', ex_IDX)
+            self.register_buffer('ex_features', ex_features)
 
             if args.use_mult:
                 self.mult = nn.Parameter(torch.ones(args.num_classes))
             if args.use_thresh:
                 self.thresh = nn.Parameter(torch.zeros(args.num_classes))
-
-            if args.do_class is not None:
-                self.do_class = nn.Dropout(p = args.do_class)
-            else:
-                self.do_class = None
-
-            self.set_exemplars(ex_features, ex_classes, ex_IDX)
-            self.initialise_exemplars()
-
-    def set_exemplars(self, ex_features, ex_classes, ex_IDX):
-        
-        self.ex_IDX = ex_IDX
-        if ex_classes is None:
-            self.ex_classes = None
-        else:
-            self.ex_classes = nn.Parameter(ex_classes, requires_grad = False)
-        # self.ex_features = ex_features
-        if ex_features is None:
-            self.ex_features = None
-        else:
-            self.ex_features = nn.Parameter(ex_features, requires_grad = False)
-            # print(f"ex_features init: \n{self.ex_features}")
-
-
-    def initialise_exemplars(self):
-
-        if self.args.class_dim is None:
-            class_reps = torch.arange(self.args.num_labels)
-            class_reps = nn.functional.one_hot(class_reps).type(torch.float)
-        else:
-            class_reps = torch.rand(self.args.num_labels, self.args.class_dim, dtype = torch.float)
-        self.class_reps = torch.nn.Parameter(class_reps, requires_grad = self.args.train_class_reps)
-
-        if self.args.train_ex_class:
-            # ex_class_reps = class_reps[self.ex_classes]
-            ex_class_reps = torch.matmul(
-                torch.nn.functional.normalize(self.ex_classes, dim = -1, p = 1),
-                # self.ex_classes,
-                self.class_reps
-            )
-            self.ex_class_reps = torch.nn.Parameter(ex_class_reps)
-            # print("ex_class_reps.size:", self.ex_class_reps.size())
+                
 
     def forward(self, features, labels = None, ex_features = None, ex_classes = None, p_factor = None):
         
@@ -1156,15 +1117,16 @@ class minerva_ffnn(base_model):
         # print(f"features.size: {features.size()}, ex_features.size: {self.ex_features.size()}")
 
         ex_features = ex_features if ex_features is not None else self.ex_features
+        # ex_classes = ex_classes if ex_classes is not None else self.ex_classes
 
         # if self.args.train_ex_feats:
         #     ex_features += self.add_ex_feats
 
-        if self.do_feat is not None:
-            features = self.do_feat(features)
-            ex_features = self.do_feat(ex_features)
+        # if self.do_feat is not None:
+        #     features = self.do_feat(features)
+        #     ex_features = self.do_feat(ex_features)
 
-        if self.args.use_g:
+        if self.args.feat_dim is not None:
             features = self.g(features)
             ex_features = self.g(ex_features)
         # print(f"features.size: {features.size()}, ex_features.size: {ex_features.size()}")
@@ -1172,24 +1134,8 @@ class minerva_ffnn(base_model):
         # if self.do_feat is not None:
         #     features = self.do_feat(features)
         #     ex_features = self.do_feat(ex_features)
-
-        if ex_classes is None and self.args.train_ex_class:
-            ex_class_reps = self.ex_class_reps
-        elif ex_classes is None:
-            ex_class_reps = torch.matmul(
-                # torch.nn.functional.normalize(self.ex_classes, dim = -1),
-                self.ex_classes,
-                self.class_reps
-            )
-        else:
-            ex_class_reps = torch.matmul(
-                # torch.nn.functional.normalize(ex_classes, dim = -1),
-                ex_classes,
-                self.class_reps
-            )
             
-        if self.do_class is not None:
-            ex_class_reps = self.do_class(ex_class_reps)
+        ex_class_reps = self.do_class(self.ex_class_reps)
 
         # print(f"class rep dim: {class_reps.size()}")    
         # print(f"ex_classes dim: {self.ex_classes.size()}")   
@@ -1204,7 +1150,7 @@ class minerva_ffnn(base_model):
         # logits = -torch.cdist(echo, self.class_reps)
         logits = torch.matmul(
             nn.functional.normalize(echo, dim = -1),
-            nn.functional.normalize(self.class_reps, dim = -1)
+            nn.functional.normalize(self.class_reps, dim = -1).t()
         )
         if self.args.use_mult:
             logits = logits * self.mult
@@ -1228,6 +1174,7 @@ class minerva_ffnn(base_model):
         }
 
         return output
+    
 
     def activation(self, s, p_factor = None):
 
@@ -1236,34 +1183,27 @@ class minerva_ffnn(base_model):
 
         return torch.mul(torch.pow(torch.abs(s), p_factor), torch.sign(s))
     
+    
     def save_pretrained(self, output_dir, epoch = None):    
 
+        self.to('cpu')
         super().save_pretrained(output_dir, epoch)
-        
-        if self.ex_IDX is not None:
-            torch.save(self.ex_IDX, output_dir + "/ex_IDX.pt")
+        self.to(self.args.device)
 
 
     def load_pretrained(self, load_dir, epoch = None):
+
+        self.to('cpu')
 
         ep = f"{epoch}_" if epoch is not None else ""
         args = torch.load(f"{load_dir}/{ep}config.json")
         state_dict = torch.load(f"{load_dir}/{ep}model.mod")
 
-        ex_classes = state_dict['ex_classes'].to('cpu') if 'ex_classes' in state_dict else None
-        # ex_class_reps = state_dict['ex_class_reps'] if 'ex_class_reps' in state_dict else None
-        ex_features = state_dict['ex_features'].to('cpu') if 'ex_features' in state_dict else None
-
-        if os.path.exists(load_dir + "/ex_IDX.pt"):
-            ex_IDX = torch.load(load_dir + "/ex_IDX.pt")
-        else:
-            ex_IDX = None
-
         self.__init__(
             args,
-            ex_classes = ex_classes,
-            ex_features = ex_features,
-            ex_IDX = ex_IDX
+            ex_classes = state_dict['ex_class_reps'],
+            ex_features = state_dict['ex_features'],
+            ex_IDX = state_dict['ex_idx']
         )
 
         self.load_state_dict(state_dict)
@@ -1322,76 +1262,5 @@ class BertForMultiLabelClassification(BertPreTrainedModel):
 
         return loss, logits
         # return outputs  # (loss), logits, (hidden_states), (attentions)
-
-
-
-# class BertMinervaForMultiLabelClassification(BertPreTrainedModel):
-#     def __init__(self, config, args, exemplars = None, ex_IDX = None):
-#         super().__init__(config)
-
-#         self.num_labels = config.num_labels
-#         self.exemplars = exemplars
-
-#         self.bert = BertModel(config)
-#         self.minerva = minerva(
-#             args,
-#             ex_classes = exemplars[3] if exemplars is not None else None,
-#             ex_IDX = ex_IDX
-#         )
-#         self.loss_fct = nn.BCELoss()
-
-#         self.init_weights()
-
-
-#     def forward(
-#             self,
-#             input_ids=None,
-#             attention_mask=None,
-#             token_type_ids=None,
-#             position_ids=None,
-#             head_mask=None,
-#             inputs_embeds=None,
-#             exemplars = None,
-#             labels=None,
-#     ):
-
-#         exemplars = exemplars if exemplars is not None else self.exemplars
-
-#         outputs = self.bert(
-#             input_ids,
-#             attention_mask=attention_mask,
-#             token_type_ids=token_type_ids,
-#             position_ids=position_ids,
-#             head_mask=head_mask,
-#             inputs_embeds=inputs_embeds,
-#         )
-#         pooled_output = outputs[1]
-
-#         exemplar_output = self.bert(
-#             input_ids = exemplars[0],
-#             attention_mask = exemplars[1],
-#             token_type_ids = exemplars[2]
-#         )
-#         pooled_exemplar_output = exemplar_output[1]
-
-#         loss, logits = self.minerva(
-#             features = pooled_output, 
-#             ex_features = pooled_exemplar_output,
-#             ex_classes = exemplars[3] if self.minerva.ex_classes is None else None,
-#             labels = labels
-#         )
-
-#         # outputs = (logits,) + outputs[2:]  # add hidden states and attention if they are here
-
-#         # if labels is not None:
-#         #     loss = self.loss_fct(echos, labels)
-#         # outputs = (loss,) + outputs
-
-#         return loss, logits
-#         # return outputs  # (loss), logits, (hidden_states), (attentions)
-    
-#     def save_pretrained(self, save_directory: str, is_main_process: bool = True, state_dict: dict or None = None, save_function = torch.save, push_to_hub: bool = False, max_shard_size: int or str = "10GB", safe_serialization: bool = False, **kwargs):
-#         self.minerva.save_pretrained(save_directory)
-#         return super().save_pretrained(save_directory, is_main_process, state_dict, save_function, push_to_hub, max_shard_size, safe_serialization, **kwargs)
 
 
