@@ -285,19 +285,21 @@ class ffnn_init(base_model):
         super().__init__(args, load_dir)
 
         self.loss_fct = nn.BCEWithLogitsLoss()
+
+        class_dim = args.class_dim if args.class_dim is not None else args.num_classes
         
         self.layer0 = nn.Linear(args.input_dim, args.feat_dim)
         self.do0 = nn.Dropout(p = args.do_class)
         self.activation0 = self.select_activation(args.act0)
-        self.layer1 = nn.Linear(args.feat_dim, args.class_dim)
+        self.layer1 = nn.Linear(args.feat_dim, class_dim)
         self.do1 = nn.Dropout(p = args.do_class)
         self.activation1 = self.select_activation(args.act1)
-        self.layer2 = nn.Linear(args.class_dim, args.num_classes)
+        self.layer2 = nn.Linear(class_dim, args.num_classes)
 
         if args.use_layer_norm:
             self.ln0 = nn.LayerNorm(args.input_dim)
             self.ln1 = nn.LayerNorm(args.feat_dim)
-            self.ln2 = nn.LayerNorm(args.class_dim)
+            self.ln2 = nn.LayerNorm(class_dim)
             
         alpha = torch.tensor([self.args.alpha], dtype = torch.float)
         self.alpha = nn.Parameter(alpha, requires_grad = self.args.train_alpha)
@@ -318,8 +320,17 @@ class ffnn_init(base_model):
             print(f"{acivation_name} is not known.")
 
 
-    def initialise_layers(self, intiialisation, inits = None):
-        if intiialisation == 'minerva':
+    def initialise_layers(self, initialisation, inits = None):
+
+        if initialisation is None:
+            nn.init.kaiming_uniform_(self.layer0.weight, nonlinearity='relu')
+            nn.init.kaiming_uniform_(self.layer1.weight, nonlinearity='relu')
+            nn.init.kaiming_uniform_(self.layer2.weight, nonlinearity='relu')
+            nn.init.zeros_(self.layer0.bias)
+            nn.init.zeros_(self.layer1.bias)
+            nn.init.zeros_(self.layer2.bias)
+
+        if initialisation == 'minerva':
 
             ex_feats, ex_classes = inits
             class_dim = self.args.class_dim if self.args.class_dim is not None else self.args.num_classes
@@ -335,6 +346,8 @@ class ffnn_init(base_model):
                 # nn.init.kaiming_uniform_(class_transform, a=math.sqrt(5))
                 class_transform = (torch.rand(self.args.num_classes, self.args.class_dim, dtype = torch.float) - 0.5) / 16
                 class_reps = class_reps @ class_transform
+            else:
+                class_transform = torch.eye(self.args.num_classes, dtype = torch.float)
 
             ex_reps = nn.functional.normalize(ex_classes, dim = -1)
             ex_reps = (ex_reps @ class_transform).t()
@@ -346,7 +359,7 @@ class ffnn_init(base_model):
             self.layer2.bias = nn.Parameter(torch.zeros(self.args.num_classes))           
 
 
-        elif intiialisation == "minerva2":
+        elif initialisation == "minerva2":
             
             ex_feats, ex_classes = inits
             class_dim = self.args.class_dim if self.args.class_dim is not None else self.args.num_classes
@@ -382,7 +395,7 @@ class ffnn_init(base_model):
             self.layer2.bias = nn.Parameter(torch.zeros(self.args.num_classes))
 
             
-        elif intiialisation == 'minerva3':
+        elif initialisation == 'minerva3':
 
             ex_feats, ex_classes = inits
             class_dim = self.args.class_dim if self.args.class_dim is not None else self.args.num_classes
@@ -414,12 +427,56 @@ class ffnn_init(base_model):
             self.layer2.weight = nn.Parameter(class_reps)
             self.layer2.bias = nn.Parameter(torch.zeros(self.args.num_classes))
 
-        elif self.args.minerva_initialisation is not None:
-            print(f"Unknown initialisation {self.args.minerva_initialisation}.")
+            
+        elif initialisation == "minerva4":
+            
+            print("Using Minerva4 initialisation...")
+            ex_feats, ex_classes = inits
+
+            print(f"ex_feats:\n{ex_feats}")
+            print(f"ex_classes:\n{ex_classes}")
+            print(f"ex_feats size: {ex_feats.size()}, ex_classes size: {ex_classes.size()}")
+
+            TT = nn.functional.normalize(ex_feats, dim = -1) @ torch.transpose(ex_feats, dim0 = -2, dim1 = -1)
+            TT = self.activation0(TT)
+            TT_mean = (TT - torch.diag(TT.diagonal()).sum()) / (self.args.feat_dim - 1)**2
+            TT = TT - torch.diag(TT.diagonal()) + TT_mean * torch.eye(self.args.feat_dim, dtype = torch.float)
+            TT = TT.var().sqrt()
+
+            F = ex_feats.var().sqrt()
+
+            # self.layer0.weight = nn.Parameter(nn.functional.normalize(ex_feats, dim = -1) * F / TT)
+            self.layer0.weight = nn.Parameter(nn.functional.normalize(ex_feats, dim = -1))
+            nn.init.zeros_(self.layer0.bias)
+            
+            if self.args.class_dim is not None:
+                class_reps = torch.empty(self.args.num_classes, self.args.class_dim, dtype = torch.float)
+                nn.init.kaiming_uniform_(class_reps, nonlinearity='relu')
+            else:
+                class_reps = torch.eye(self.args.num_classes, dtype = torch.float)
+
+            ex_reps = nn.functional.normalize(ex_classes, dim = -1)
+            ex_reps = (ex_reps @ class_reps).t()
+
+            self.layer1.weight = nn.Parameter(ex_classes.t())
+            # self.layer1.weight = nn.Parameter(ex_reps)
+            nn.init.zeros_(self.layer1.bias)
+
+            self.layer2.weight = nn.Parameter(class_reps)
+            nn.init.zeros_(self.layer2.bias)
+            # print(self.layer0.bias)
+            # print(self.layer1.bias)
+            # print(self.layer2.bias)
+            # quit()
+
+        elif initialisation is not None:
+            print(f"Unknown initialisation {initialisation}.")
             quit()
     
 
-    def forward(self, features, labels, debug = False):
+    def forward(self, features, labels, debug = True):
+
+        # features = nn.functional.normalize(features, dim = -1)
 
         if self.args.use_layer_norm:
             features = self.ln0(features)
@@ -430,7 +487,7 @@ class ffnn_init(base_model):
         if debug: print(f"output of layer 0 size:\n{logits.size()}\n")
 
         logits = self.do0(logits)
-        logits = self.activation0(logits)
+        # logits = self.activation0(logits)
         if debug: print(f"output of layer 0 activation:\n{logits}\n")
         if debug: print(f"sum of layer 0 activation:\n{logits.sum(dim = -1)}")
         if self.args.use_layer_norm:
@@ -442,7 +499,7 @@ class ffnn_init(base_model):
         if debug: print(f"output of layer 1 size:\n{logits.size()}\n")
 
         logits = self.do1(logits)
-        logits = self.activation1(logits)
+        # logits = self.activation1(logits)
         if debug: print(f"output of layer 1 activation:\n{logits}\n")
         if self.args.use_layer_norm:
             logits = self.ln2(logits)

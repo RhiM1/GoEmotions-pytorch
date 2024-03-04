@@ -459,6 +459,8 @@ def main(args):
                 (ex_features, ex_classes)
             )
 
+    print(model)
+
     model.to(args.device)
 
     if dev_dataset is None:
