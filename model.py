@@ -168,24 +168,23 @@ class minerva2(nn.Module):
         # s has dim (batch_size, ex_batch_size)
         s = torch.matmul(
             nn.functional.normalize(features, dim = 1), 
-            torch.t(nn.functional.normalize(ex_features, dim = 1))
+            nn.functional.normalize(ex_features, dim = 1).transpose(dim0 = -2, dim1 = -1)
         )
 
         # a has dim (batch_size, ex_batch_size)
         if self.use_sm:
             a = self.sm(p_factor * s)
-            intensity = a.sum(dim = 1)
+            # intensity = a.sum(dim = 1)
         else:
             a = self.activation(s, p_factor)
-            intensity = a.sum(dim = 1)
+            # intensity = a.sum(dim = 1)
             if self.normalize_a:
                 a = torch.nn.functional.normalize(a, p = 1, dim = -1)
-
 
         # echo has dim (batch_size, class_dim)
         echo = torch.matmul(a, ex_class_reps)
 
-        return echo, intensity
+        return echo, a
 
     
     def activation(self, s, p_factor = None):
@@ -474,7 +473,7 @@ class ffnn_init(base_model):
             quit()
     
 
-    def forward(self, features, labels, debug = True):
+    def forward(self, features, labels, debug = False):
 
         # features = nn.functional.normalize(features, dim = -1)
 
@@ -487,7 +486,7 @@ class ffnn_init(base_model):
         if debug: print(f"output of layer 0 size:\n{logits.size()}\n")
 
         logits = self.do0(logits)
-        # logits = self.activation0(logits)
+        logits = self.activation0(logits)
         if debug: print(f"output of layer 0 activation:\n{logits}\n")
         if debug: print(f"sum of layer 0 activation:\n{logits.sum(dim = -1)}")
         if self.args.use_layer_norm:
@@ -499,7 +498,7 @@ class ffnn_init(base_model):
         if debug: print(f"output of layer 1 size:\n{logits.size()}\n")
 
         logits = self.do1(logits)
-        # logits = self.activation1(logits)
+        logits = self.activation1(logits)
         if debug: print(f"output of layer 1 activation:\n{logits}\n")
         if self.args.use_layer_norm:
             logits = self.ln2(logits)
@@ -693,6 +692,7 @@ class minerva(base_model):
         else:
             self.ex_IDX = None
     
+
 
 
 class minerva_detEx(base_model):
@@ -1259,6 +1259,331 @@ class minerva_ffnn(base_model):
         self.__init__(
             args,
             ex_classes = state_dict['ex_class_reps'],
+            ex_features = state_dict['ex_features'],
+            ex_IDX = state_dict['ex_idx']
+        )
+
+        self.load_state_dict(state_dict)
+        self.to(self.args.device)
+
+
+
+
+class minerva_ffnn3(base_model):
+    # Exemplar model incorporating multi-head attention for exemplar weighting, 
+    # with separate attention for the acoustic and phonetic information.
+    def __init__(
+        self, 
+        args,
+        ex_classes = None,
+        ex_features = None,
+        ex_IDX = None,
+        load_dir = None
+    ):
+
+        if load_dir is not None:
+            self.load_pretrained(load_dir)
+        else:
+            super().__init__(args = args, load_dir = load_dir)
+
+            self.loss_fct = nn.BCEWithLogitsLoss()
+
+            if args.feat_dim is not None:
+                self.g_q = nn.Sequential(
+                    nn.Linear(
+                        in_features = self.args.input_dim,
+                        out_features = args.feat_dim
+                    ),
+                    nn.Dropout(p = args.do_feat)
+                )
+                self.g_k = nn.Sequential(
+                    nn.Linear(
+                        in_features = self.args.input_dim,
+                        out_features = args.feat_dim
+                    ),
+                    nn.Dropout(p = args.do_feat)
+                )
+
+            self.do_class = nn.Dropout(p = args.do_class)
+
+            if args.class_dim is not None:
+                class_reps = torch.rand(args.num_classes, args.class_dim)
+            else:
+                class_reps = torch.eye(args.num_classes, dtype = torch.float)
+
+            if args.train_class_reps:
+                self.class_reps = nn.Parameter(class_reps)
+            else:
+                self.register_buffer('class_reps', class_reps)
+
+            if args.train_ex_class:
+                self.ex_class_reps = nn.Parameter(ex_classes)
+            else:
+                self.register_buffer('ex_class_reps', ex_classes)
+
+            self.minerva = minerva2(p_factor = args.p_factor, use_sm = args.use_sm)
+            
+            self.register_buffer('ex_idx', ex_IDX)
+            self.register_buffer('ex_features', ex_features)
+
+            if args.use_mult:
+                self.mult = nn.Parameter(torch.ones(args.num_classes))
+            if args.use_thresh:
+                self.thresh = nn.Parameter(torch.zeros(args.num_classes))
+                
+
+    def forward(self, features, labels = None, ex_features = None, ex_classes = None, p_factor = None):
+        
+        # features has dim (batch_size, input_dim)
+        # ex_features has dim (ex_batch_size, input_dim)
+        # ex_phone_reps has dim (ex_batch_size, phone_dim)
+        # ex_reps has dim (num_classes, phone_dim)
+        # print(f"features.size: {features.size()}, ex_features.size: {self.ex_features.size()}")
+
+        ex_features = ex_features if ex_features is not None else self.ex_features
+        # ex_classes = ex_classes if ex_classes is not None else self.ex_classes
+
+        # if self.args.train_ex_feats:
+        #     ex_features += self.add_ex_feats
+
+        # if self.do_feat is not None:
+        #     features = self.do_feat(features)
+        #     ex_features = self.do_feat(ex_features)
+
+        if self.args.feat_dim is not None:
+            features = self.g_q(features)
+            ex_features = self.g_k(ex_features)
+        # print(f"features.size: {features.size()}, ex_features.size: {ex_features.size()}")
+
+        # if self.do_feat is not None:
+        #     features = self.do_feat(features)
+        #     ex_features = self.do_feat(ex_features)
+            
+        ex_class_reps = self.do_class(self.ex_class_reps)
+
+        # print(f"class rep dim: {class_reps.size()}")    
+        # print(f"ex_classes dim: {self.ex_classes.size()}")   
+        # print(f"features dim: {features.size()}")
+        # print(f"ex_features dim: {ex_features.size()}")
+        # print(f"ex_class_reps dim: {ex_class_reps.size()}")
+
+
+        echo, _ = self.minerva(features, ex_features, ex_class_reps, p_factor)
+
+        # probs has dim (batch_size, num_phones)
+        logits = nn.functional.normalize(echo, dim = -1)
+        if self.args.use_mult:
+            logits = logits * self.mult
+        if self.args.use_thresh:
+            logits = logits - self.thresh
+
+        if labels is not None:
+            loss = self.loss_fct(logits, labels)
+        else:
+            loss = None
+
+        output = {
+            'echo': echo,
+            'loss': loss,
+            'logits': logits
+        }
+
+        return output
+    
+
+    def activation(self, s, p_factor = None):
+
+        if p_factor is None:
+            p_factor = self.args.p_factor
+
+        return torch.mul(torch.pow(torch.abs(s), p_factor), torch.sign(s))
+    
+    
+    def save_pretrained(self, output_dir, epoch = None):    
+
+        self.to('cpu')
+        super().save_pretrained(output_dir, epoch)
+        self.to(self.args.device)
+
+
+    def load_pretrained(self, load_dir, epoch = None):
+
+        self.to('cpu')
+
+        ep = f"{epoch}_" if epoch is not None else ""
+        args = torch.load(f"{load_dir}/{ep}config.json")
+        state_dict = torch.load(f"{load_dir}/{ep}model.mod")
+
+        self.__init__(
+            args,
+            ex_classes = state_dict['ex_class_reps'],
+            ex_features = state_dict['ex_features'],
+            ex_IDX = state_dict['ex_idx']
+        )
+
+        self.load_state_dict(state_dict)
+        self.to(self.args.device)
+
+
+
+
+class minerva_ffnn2(base_model):
+    # Exemplar model incorporating multi-head attention for exemplar weighting, 
+    # with separate attention for the acoustic and phonetic information.
+    def __init__(
+        self, 
+        args,
+        ex_classes = None,
+        ex_features = None,
+        ex_IDX = None,
+        load_dir = None
+    ):
+        super().__init__(args = args, load_dir = load_dir)
+
+        if load_dir is not None:
+            self.load_pretrained(load_dir)
+        else:
+
+            self.loss_fct = nn.BCEWithLogitsLoss()
+
+            if args.feat_dim is not None:
+                self.g = nn.Sequential(
+                    nn.Linear(
+                        in_features = self.args.input_dim,
+                        out_features = args.feat_dim
+                    ),
+                    nn.Dropout(p = args.do_feat)
+                )
+
+            self.do_class = nn.Dropout(p = args.do_class)
+
+            self.class_dim = 2
+
+            class_reps = torch.tensor([
+                [0, 1],
+                [-1, 0],
+                [0, -1],
+                [1, 0]
+            ], dtype = torch.float)
+
+            if args.train_class_reps:
+                self.class_reps = nn.Parameter(class_reps)
+            else:
+                self.register_buffer('class_reps', class_reps)
+
+            ex_class_reps = nn.functional.normalize(ex_classes.to(torch.float), dim = -1) @ class_reps
+
+            if args.train_ex_class:
+                self.ex_class_reps = nn.Parameter(ex_class_reps)
+            else:
+                self.register_buffer('ex_class_reps', ex_class_reps)
+
+            self.minerva = minerva2(p_factor = args.p_factor, use_sm = args.use_sm)
+            
+            self.register_buffer('ex_idx', ex_IDX)
+            self.register_buffer('ex_classes', ex_classes)
+            self.register_buffer('ex_features', ex_features)
+
+            if args.use_mult:
+                self.mult = nn.Parameter(torch.ones(args.num_classes))
+            if args.use_thresh:
+                self.thresh = nn.Parameter(torch.zeros(args.num_classes))
+                
+
+    def forward(self, features, labels = None, ex_features = None, ex_classes = None, p_factor = None):
+        
+        # features has dim (batch_size, input_dim)
+        # ex_features has dim (ex_batch_size, input_dim)
+        # ex_phone_reps has dim (ex_batch_size, phone_dim)
+        # ex_reps has dim (num_classes, phone_dim)
+        # print(f"features.size: {features.size()}, ex_features.size: {self.ex_features.size()}")
+
+        ex_features = ex_features if ex_features is not None else self.ex_features
+        # ex_classes = ex_classes if ex_classes is not None else self.ex_classes
+
+        # if self.args.train_ex_feats:
+        #     ex_features += self.add_ex_feats
+
+        # if self.do_feat is not None:
+        #     features = self.do_feat(features)
+        #     ex_features = self.do_feat(ex_features)
+
+        if self.args.feat_dim is not None:
+            features = self.g(features)
+            ex_features = self.g(ex_features)
+        # print(f"features.size: {features.size()}, ex_features.size: {ex_features.size()}")
+
+        # if self.do_feat is not None:
+        #     features = self.do_feat(features)
+        #     ex_features = self.do_feat(ex_features)
+            
+        ex_class_reps = self.do_class(self.ex_class_reps)
+
+        # print(f"class rep dim: {class_reps.size()}")    
+        # print(f"ex_classes dim: {self.ex_classes.size()}")   
+        # print(f"features dim: {features.size()}")
+        # print(f"ex_features dim: {ex_features.size()}")
+        # print(f"ex_class_reps dim: {ex_class_reps.size()}")
+
+        echo, a = self.minerva(features, ex_features, ex_class_reps, p_factor)
+
+        # probs has dim (batch_size, num_phones)
+        # logits = -torch.cdist(echo, self.class_reps)
+        logits = torch.matmul(
+            nn.functional.normalize(echo, dim = -1),
+            nn.functional.normalize(self.class_reps, dim = -1).t()
+        )
+        if self.args.use_mult:
+            logits = logits * self.mult
+        if self.args.use_thresh:
+            logits = logits - self.thresh
+        # print(f"dists:\n{-logits}")
+        # print(f"echo:\n{echo}")
+        # print(f"CR:\n{self.class_reps}")
+        # print(f"\nneg_dists:\n{neg_dists}")
+
+        if labels is not None:
+            loss = self.loss_fct(logits, labels)
+        else:
+            loss = None
+            # print(f"\nloss: {loss}")
+
+        output = {
+            'echo': echo,
+            'loss': loss,
+            'logits': logits,
+            'activations': a
+        }
+
+        return output
+    
+
+    def activation(self, s, p_factor = None):
+
+        if p_factor is None:
+            p_factor = self.args.p_factor
+
+        return torch.mul(torch.pow(torch.abs(s), p_factor), torch.sign(s))
+    
+    
+    def save_pretrained(self, output_dir, epoch = None):    
+
+        self.to('cpu')
+        super().save_pretrained(output_dir, epoch)
+        self.to(self.args.device)
+
+
+    def load_pretrained(self, load_dir, epoch = None):
+
+        self.to('cpu')
+
+        ep = f"{epoch}_" if epoch is not None else ""
+        args = torch.load(f"{load_dir}/{ep}config.json")
+        state_dict = torch.load(f"{load_dir}/{ep}model.mod")
+
+        self.__init__(
+            args,
+            ex_classes = state_dict['ex_classes'],
             ex_features = state_dict['ex_features'],
             ex_IDX = state_dict['ex_idx']
         )

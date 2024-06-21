@@ -17,7 +17,7 @@ import gensim.downloader as api
 #     get_linear_schedule_with_warmup, get_constant_schedule_with_warmup
 from sentence_transformers import SentenceTransformer, util
 
-from model import ffnn_wrapper, minerva, minerva_ffnn, ffnn_init, minerva_ffnn2
+from model import minerva, minerva_ffnn3, ffnn_init
 
 from utils import init_logger, set_seed, compute_metrics
 from data_loader import load_and_cache_examples, GoEmotionsProcessor
@@ -426,60 +426,58 @@ def main(args):
     args.input_dim = example_feats.size(0)
     args.num_labels = example_classes.size(0)
 
-    if args.model_type == 'ffnn':
-        model = ffnn_wrapper(args)
-    else:
-        if args.fix_ex or args.model_type == 'ffnn_init':
-            if args.model_type == 'ffnn_init':
-                args.num_ex = args.feat_dim
-            if args.use_stratified_ex:
-                ex_IDX = get_stratified_ex_idx(train_dataset, args)
-            else:
-                ex_IDX = torch.randperm(len(train_dataset))[0:args.num_ex]
-            exemplars = train_dataset[ex_IDX]
-            ex_features = exemplars[0]
-            ex_classes = exemplars[1]
+    # if args.model_type == 'minerva_ffnn':
+    #     if args.model_type == 'ffnn_init':
+    #         args.num_ex = args.feat_dim
+    #     if args.use_stratified_ex:
+    #         ex_IDX = get_stratified_ex_idx(train_dataset, args)
+    #     else:
+    #         ex_IDX = torch.randperm(len(train_dataset))[0:args.num_ex]
+    #     exemplars = train_dataset[ex_IDX]
+    #     ex_features = exemplars[0]
+    #     ex_classes = exemplars[1]
+    # else:
+    print(args.model_type)
+    # if args.model_type == 'minerva':
+    #     model = minerva(
+    #         args,
+    #         ex_classes = ex_classes,
+    #         ex_features = ex_features,
+    #         ex_IDX = ex_IDX
+    #     )
+    if args.model_type == 'minerva_ffnn':
+        if args.use_stratified_ex:
+            ex_IDX = get_stratified_ex_idx(train_dataset, args)
         else:
-            ex_IDX = None
-            ex_features = None
-            ex_classes = None
-        print(args.model_type)
-        if args.model_type == 'minerva':
-            model = minerva(
-                args,
-                ex_classes = ex_classes,
-                ex_features = ex_features,
-                ex_IDX = ex_IDX
-            )
-        elif args.model_type == 'minerva_ffnn':
-            model = minerva_ffnn(
-                args,
-                ex_classes = ex_classes,
-                ex_features = ex_features,
-                ex_IDX = ex_IDX
-            )
-        elif args.model_type == 'minerva_ffnn2':
-            print("At the model stage...")
-            model = minerva_ffnn2(
-                args,
-                ex_classes = ex_classes,
-                ex_features = ex_features,
-                ex_IDX = ex_IDX
-            )
-        elif args.model_type == 'ffnn_init':
-            model = ffnn_init(
-                args
-            )
-            model.initialise_layers(
-                args.minerva_initialisation, 
-                (ex_features, ex_classes)
-            )
+            ex_IDX = torch.randperm(len(train_dataset))[0:args.num_ex]
+        exemplars = train_dataset[ex_IDX]
+        ex_features = exemplars[0]
+        ex_classes = exemplars[1]
+        model = minerva_ffnn3(
+            args,
+            ex_classes = ex_classes,
+            ex_features = ex_features,
+            ex_IDX = ex_IDX
+        )
+    # elif args.model_type == 'minerva_ffnn2':
+    #     print("At the model stage...")
+    #     model = minerva_ffnn2(
+    #         args,
+    #         ex_classes = ex_classes,
+    #         ex_features = ex_features,
+    #         ex_IDX = ex_IDX
+    #     )
+    elif args.model_type == 'ffnn_init':
+        # ex_IDX = None
+        # ex_features = None
+        # ex_classes = None
+        model = ffnn_init(args)
+        model.initialise_layers(initialisation = None)
 
     print(model)
     
     learned_params, unlearned_params = count_parameters(model)
     print(f"Learned parameters: {learned_params}, Unlearned parameters: {unlearned_params}\n")
-    # quit()
 
     model.to(args.device)
 
@@ -579,7 +577,7 @@ if __name__ == '__main__':
 
     # General args
     arg_parser.add_argument(
-        "--exp_id", help = "experiment id", default = "001"
+        "--exp_id", help = "experiment id", default = "test"
     )
     arg_parser.add_argument(
         "--run_id", help = "ID of current run", default = "test"
@@ -588,7 +586,7 @@ if __name__ == '__main__':
         "--skip_wandb", help="Don't use WandB logging", default=False, action='store_true'
     )
     arg_parser.add_argument(
-        "--wandb_project", help = "WandB project name", default = "IS_goemotions"
+        "--wandb_project", help = "WandB project name", default = "CSL_goem"
     )
     arg_parser.add_argument(
         "--evaluate_test_during_training", help="", default=True, action='store_true'
@@ -647,10 +645,10 @@ if __name__ == '__main__':
         "--use_g", help="", default=False, action='store_true'
     )
     arg_parser.add_argument(
-        "--use_mult", help="", default=False, action='store_true'
+        "--use_mult", help="", default=True, action='store_true'
     )
     arg_parser.add_argument(
-        "--use_thresh", help="", default=False, action='store_true'
+        "--use_thresh", help="", default=True, action='store_true'
     )
     arg_parser.add_argument(
         "--use_ffnn", help="", default=False, action='store_true'

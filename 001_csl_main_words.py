@@ -17,11 +17,11 @@ import gensim.downloader as api
 #     get_linear_schedule_with_warmup, get_constant_schedule_with_warmup
 from sentence_transformers import SentenceTransformer, util
 
-from model import ffnn_wrapper, minerva, minerva_ffnn, ffnn_init, minerva_ffnn2
+from model import ffnn_wrapper, minerva, minerva_ffnn, ffnn_init, minerva_ffnn2, minerva_tm
 
 from utils import init_logger, set_seed, compute_metrics
 from data_loader import load_and_cache_examples, GoEmotionsProcessor
-from w2v_dataset import get_goem_dataset, get_stratified_ex_idx
+from w2v_dataset import get_goem_dataset2, get_stratified_ex_idx
 from LSA_process import get_lsa_dict
 
 from sklearn.metrics import roc_auc_score
@@ -48,10 +48,10 @@ def train(
 
     train_sampler = RandomSampler(train_dataset)
     train_dataloader = DataLoader(train_dataset, sampler=train_sampler, batch_size=args.train_batch_size)
-    if args.exemplar and not args.fix_ex:
-        total_ex = len(train_dataset)
-        ex_so_far = 0
-        ex_dataloader = iter(DataLoader(train_dataset, sampler=RandomSampler(train_dataset), batch_size=args.num_ex))
+    # if args.exemplar and not args.fix_ex:
+    #     total_ex = len(train_dataset)
+    #     ex_so_far = 0
+    #     ex_dataloader = iter(DataLoader(train_dataset, sampler=RandomSampler(train_dataset), batch_size=args.num_ex))
 
     if args.max_steps > 0:
         t_total = args.max_steps
@@ -130,28 +130,28 @@ def train(
                     "token_type_ids": batch[2],
                     "labels": batch[3]
                 }
-                if args.exemplar and not args.fix_ex:
-                    ex_so_far += args.num_ex
-                    if ex_so_far > total_ex:
-                        ex_dataloader = iter(DataLoader(train_dataset, sampler=RandomSampler(train_dataset), batch_size=args.num_ex))
-                        ex_so_far = args.num_ex
-                    exemplars = next(ex_dataloader)
-                    inputs['exemplars'] = [exemplar.to(args.device) for exemplar in exemplars]
+                # if args.exemplar and not args.fix_ex:
+                #     ex_so_far += args.num_ex
+                #     if ex_so_far > total_ex:
+                #         ex_dataloader = iter(DataLoader(train_dataset, sampler=RandomSampler(train_dataset), batch_size=args.num_ex))
+                #         ex_so_far = args.num_ex
+                #     exemplars = next(ex_dataloader)
+                #     inputs['exemplars'] = [exemplar.to(args.device) for exemplar in exemplars]
 
             else:
                 inputs = {
-                    "features": batch[0],
+                    "features": batch[2],
                     "labels": batch[1]
                 }
-                if args.exemplar and not args.fix_ex:
-                    ex_so_far += args.num_ex
-                    if ex_so_far > total_ex:
-                        ex_dataloader = iter(DataLoader(train_dataset, sampler=RandomSampler(train_dataset), batch_size=args.num_ex))
-                        ex_so_far = args.num_ex
+                # if args.exemplar and not args.fix_ex:
+                #     ex_so_far += args.num_ex
+                #     if ex_so_far > total_ex:
+                #         ex_dataloader = iter(DataLoader(train_dataset, sampler=RandomSampler(train_dataset), batch_size=args.num_ex))
+                #         ex_so_far = args.num_ex
 
-                    ex_features, ex_classes = next(ex_dataloader)
-                    inputs['ex_features'] = ex_features.to(args.device)
-                    inputs['ex_classes'] = ex_classes.to(args.device)
+                #     ex_features, ex_classes = next(ex_dataloader)
+                #     inputs['ex_features'] = ex_features.to(args.device)
+                #     inputs['ex_classes'] = ex_classes.to(args.device)
 
             output = model(**inputs)
             loss = output['loss']
@@ -269,34 +269,34 @@ def evaluate(args, model, eval_dataset, mode, ex_dataset = None, epoch=None, thr
         batch = tuple(t.to(args.device) for t in batch)
 
         with torch.no_grad():
-            if args.feats_type == 'bert':
-                inputs = {
-                    "input_ids": batch[0],
-                    "attention_mask": batch[1],
-                    "token_type_ids": batch[2],
-                    "labels": batch[3]
-                }
-                if args.exemplar and not args.fix_ex:
-                    ex_so_far += args.num_ex
-                    if ex_so_far > total_ex:
-                        ex_dataloader = iter(DataLoader(ex_dataset, sampler=RandomSampler(ex_dataset), batch_size=args.num_ex))
-                        ex_so_far = args.num_ex
-                    exemplars = next(ex_dataloader)
-                    inputs['exemplars'] = [exemplar.to(args.device) for exemplar in exemplars]
+            # if args.feats_type == 'bert':
+            #     inputs = {
+            #         "input_ids": batch[0],
+            #         "attention_mask": batch[1],
+            #         "token_type_ids": batch[2],
+            #         "labels": batch[3]
+            #     }
+            #     if args.exemplar and not args.fix_ex:
+            #         ex_so_far += args.num_ex
+            #         if ex_so_far > total_ex:
+            #             ex_dataloader = iter(DataLoader(ex_dataset, sampler=RandomSampler(ex_dataset), batch_size=args.num_ex))
+            #             ex_so_far = args.num_ex
+            #         exemplars = next(ex_dataloader)
+            #         inputs['exemplars'] = [exemplar.to(args.device) for exemplar in exemplars]
 
-            else:
-                inputs = {
-                    "features": batch[0],
-                    "labels": batch[1]
-                }
-                if args.exemplar and not args.fix_ex:
-                    ex_so_far += args.num_ex
-                    if ex_so_far > total_ex:
-                        ex_dataloader = iter(DataLoader(ex_dataset, sampler=RandomSampler(ex_dataset), batch_size=args.num_ex))
-                        ex_so_far = args.num_ex
-                    ex_features, ex_classes = next(ex_dataloader)
-                    inputs['ex_features'] = ex_features.to(args.device)
-                    inputs['ex_classes'] = ex_classes.to(args.device)
+            # else:
+            inputs = {
+                "features": batch[2],
+                "labels": batch[1]
+            }
+            # if args.exemplar and not args.fix_ex:
+            #     ex_so_far += args.num_ex
+            #     if ex_so_far > total_ex:
+            #         ex_dataloader = iter(DataLoader(ex_dataset, sampler=RandomSampler(ex_dataset), batch_size=args.num_ex))
+            #         ex_so_far = args.num_ex
+            #     ex_features, ex_classes = next(ex_dataloader)
+            #     inputs['ex_features'] = ex_features.to(args.device)
+            #     inputs['ex_classes'] = ex_classes.to(args.device)
 
             output = model(**inputs)
             tmp_eval_loss = output['loss']
@@ -408,9 +408,9 @@ def main(args):
         feats_model = SentenceTransformer('average_word_embeddings_glove.6B.300d')
 
     # Load dataset
-    train_dataset = get_goem_dataset(args, mode = 'train', model = feats_model) if args.train_file else None
-    dev_dataset = get_goem_dataset(args, mode = 'dev', model = feats_model) if args.dev_file else None
-    test_dataset = get_goem_dataset(args, mode = 'test', model = feats_model) if args.test_file else None
+    train_dataset = get_goem_dataset2(args, mode = 'train', model = feats_model) if args.train_file else None
+    dev_dataset = get_goem_dataset2(args, mode = 'dev', model = feats_model) if args.dev_file else None
+    test_dataset = get_goem_dataset2(args, mode = 'test', model = feats_model) if args.test_file else None
 
     # print(train_dataset.tensors[1].size())
     # print(train_dataset.tensors[1].sum(dim = 0))
@@ -421,7 +421,7 @@ def main(args):
 
     # quit()
 
-    example_feats, example_classes = train_dataset[0]
+    example_feats, example_classes, _, _ = train_dataset[0]
     print(f"features size: {example_feats.size(0)}, num_classes: {example_classes.size(0)}")
     args.input_dim = example_feats.size(0)
     args.num_labels = example_classes.size(0)
@@ -444,28 +444,28 @@ def main(args):
             ex_features = None
             ex_classes = None
         print(args.model_type)
-        if args.model_type == 'minerva':
-            model = minerva(
+        if args.model_type == 'minerva_tm':
+            model = minerva_tm(
                 args,
                 ex_classes = ex_classes,
                 ex_features = ex_features,
                 ex_IDX = ex_IDX
             )
-        elif args.model_type == 'minerva_ffnn':
-            model = minerva_ffnn(
-                args,
-                ex_classes = ex_classes,
-                ex_features = ex_features,
-                ex_IDX = ex_IDX
-            )
-        elif args.model_type == 'minerva_ffnn2':
-            print("At the model stage...")
-            model = minerva_ffnn2(
-                args,
-                ex_classes = ex_classes,
-                ex_features = ex_features,
-                ex_IDX = ex_IDX
-            )
+        # elif args.model_type == 'minerva_ffnn':
+        #     model = minerva_ffnn(
+        #         args,
+        #         ex_classes = ex_classes,
+        #         ex_features = ex_features,
+        #         ex_IDX = ex_IDX
+        #     )
+        # elif args.model_type == 'minerva_ffnn2':
+        #     print("At the model stage...")
+        #     model = minerva_ffnn2(
+        #         args,
+        #         ex_classes = ex_classes,
+        #         ex_features = ex_features,
+        #         ex_IDX = ex_IDX
+        #     )
         elif args.model_type == 'ffnn_init':
             model = ffnn_init(
                 args
@@ -479,7 +479,6 @@ def main(args):
     
     learned_params, unlearned_params = count_parameters(model)
     print(f"Learned parameters: {learned_params}, Unlearned parameters: {unlearned_params}\n")
-    # quit()
 
     model.to(args.device)
 
@@ -532,15 +531,15 @@ def main(args):
     if not args.skip_wandb:
         wandb.log(init_dev_results)
 
-    if args.train_alpha:
-        # epochs
-        # wanvd
-        epochs = args.num_train_epochs
-        args.num_train_epochs = args.alpha_epochs
-        alpha_epoch = train(args, model, train_dataset, tokenizer, dev_dataset, test_dataset)
-        args.train_alpha = False
-        model.alpha.requires_grad_(False)
-        args.num_train_epochs = epochs
+    # if args.train_alpha:
+    #     # epochs
+    #     # wanvd
+    #     epochs = args.num_train_epochs
+    #     args.num_train_epochs = args.alpha_epochs
+    #     alpha_epoch = train(args, model, train_dataset, tokenizer, dev_dataset, test_dataset)
+    #     args.train_alpha = False
+    #     model.alpha.requires_grad_(False)
+    #     args.num_train_epochs = epochs
 
     if not args.skip_train:
         best_epoch = train(args, model, train_dataset, tokenizer, dev_dataset, test_dataset)
@@ -708,6 +707,21 @@ if __name__ == '__main__':
     )
     arg_parser.add_argument(
         "--alpha_epochs", help = "number of epoch to train alpha for", default = 10, type = int
+    )
+    arg_parser.add_argument(
+        "--seq_based", help="use sequence-based data", default=False, action='store_true'
+    )
+    arg_parser.add_argument(
+        "--use_tm", help="use temporal Minerva", default=False, action='store_true'
+    )
+    arg_parser.add_argument(
+        "--feat_dim_tm", help = "model feature embeddings dimension, where applicable", default = None, type = int
+    )
+    arg_parser.add_argument(
+        "--p_tm", help = "p-factor for temporal minerva", default = 1, type = int
+    )
+    arg_parser.add_argument(
+        "--base", help = "p-factor for temporal minerva", default = 10000, type = int
     )
 
     # Hyperparameters
