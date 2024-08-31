@@ -17,7 +17,7 @@ import gensim.downloader as api
 #     get_linear_schedule_with_warmup, get_constant_schedule_with_warmup
 from sentence_transformers import SentenceTransformer, util
 
-from model import minerva, minerva_ffnn3, ffnn_init
+from model import minerva, minerva_ffnn4, ffnn_init, minerva_ffnn5
 
 from utils import init_logger, set_seed, compute_metrics
 from data_loader import load_and_cache_examples, GoEmotionsProcessor
@@ -442,8 +442,6 @@ def main(args):
     print(f"dev classes: {dev_dataset[torch.arange(len(dev_dataset))][1].sum(dim = 0)}")
     print(f"test classes: {test_dataset[torch.arange(len(test_dataset))][1].sum(dim = 0)}")
 
-    # quit()
-
     example_feats, example_classes = train_dataset[0]
     print(f"features size: {example_feats.size(0)}, num_classes: {example_classes.size(0)}")
     args.input_dim = example_feats.size(0)
@@ -469,19 +467,39 @@ def main(args):
     #         ex_IDX = ex_IDX
     #     )
     if args.model_type == 'minerva_ffnn':
-        if args.use_stratified_ex:
-            ex_IDX = get_stratified_ex_idx(train_dataset, args)
+        if args.fix_ex:
+            if args.use_stratified_ex:
+                ex_IDX = get_stratified_ex_idx(train_dataset, args)
+            else:
+                ex_IDX = torch.randperm(len(train_dataset))[0:args.num_ex]
+            exemplars = train_dataset[ex_IDX]
+            ex_features = exemplars[0]
+            ex_classes = exemplars[1]
+            model = minerva_ffnn4(
+                args,
+                ex_classes = ex_classes,
+                ex_features = ex_features,
+                ex_IDX = ex_IDX
+            )
         else:
-            ex_IDX = torch.randperm(len(train_dataset))[0:args.num_ex]
-        exemplars = train_dataset[ex_IDX]
-        ex_features = exemplars[0]
-        ex_classes = exemplars[1]
-        model = minerva_ffnn3(
-            args,
-            ex_classes = ex_classes,
-            ex_features = ex_features,
-            ex_IDX = ex_IDX
-        )
+            model = minerva_ffnn4(args)
+    elif args.model_type == 'minerva_ffnn5':
+        if args.fix_ex:
+            if args.use_stratified_ex:
+                ex_IDX = get_stratified_ex_idx(train_dataset, args)
+            else:
+                ex_IDX = torch.randperm(len(train_dataset))[0:args.num_ex]
+            exemplars = train_dataset[ex_IDX]
+            ex_features = exemplars[0]
+            ex_classes = exemplars[1]
+            model = minerva_ffnn5(
+                args,
+                ex_classes = ex_classes,
+                ex_features = ex_features,
+                ex_IDX = ex_IDX
+            )
+        else:
+            model = minerva_ffnn4(args)
     # elif args.model_type == 'minerva_ffnn2':
     #     print("At the model stage...")
     #     model = minerva_ffnn2(
@@ -501,7 +519,6 @@ def main(args):
     
     learned_params, unlearned_params = count_parameters(model)
     print(f"Learned parameters: {learned_params}, Unlearned parameters: {unlearned_params}\n")
-
     model.to(args.device)
 
     if dev_dataset is None:
@@ -612,7 +629,7 @@ if __name__ == '__main__':
         "--skip_wandb", help="Don't use WandB logging", default=False, action='store_true'
     )
     arg_parser.add_argument(
-        "--wandb_project", help = "WandB project name", default = "CSL_goem"
+        "--wandb_project", help = "WandB project name", default = "thesis_goem"
     )
     arg_parser.add_argument(
         "--pretrained", help = "pretrained model name", default = None
@@ -647,6 +664,9 @@ if __name__ == '__main__':
     # arg_parser.add_argument(
     #     "--num_classes", help = "number of emotion classes, default 4", default = 4, type = int
     # )
+    arg_parser.add_argument(
+        "--use_distance", help="", default=False, action='store_true'
+    )
 
 
     # Feats args
@@ -666,6 +686,9 @@ if __name__ == '__main__':
     )
     arg_parser.add_argument(
         "--feat_dim", help = "model feature embeddings dimension, where applicable", default = None, type = int
+    )
+    arg_parser.add_argument(
+        "--share_feat_transform", help="use the same feature transformation for input and exemplars", default=False, action='store_true'
     )
     arg_parser.add_argument(
         "--class_dim", help = "model class embeddings dimension, where applicable", default = None, type = int
@@ -800,7 +823,7 @@ if __name__ == '__main__':
     args = arg_parser.parse_args()
 
 
-    if args.model_type == 'minerva' or args.model_type == 'minerva_ffnn':
+    if args.model_type == 'minerva' or args.model_type == 'minerva_ffnn' or args.model_type == 'minerva_ffnn5':
         args.exemplar = True
     else:
         args.exemplar = False
